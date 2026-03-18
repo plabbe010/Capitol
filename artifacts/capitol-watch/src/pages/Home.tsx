@@ -471,7 +471,7 @@ export default function CapitolWatch() {
                           key={p} 
                           onClick={() => setFilterParty(p)} 
                           className={cn(
-                            "px-2.5 py-0.5 text-xs font-medium rounded-md transition-all",
+                            "px-2.5 py-1 text-xs font-medium rounded-md transition-all",
                             filterParty === p ? "bg-white shadow-sm text-primary" : "text-gray-500 hover:text-gray-900"
                           )}
                         >
@@ -485,7 +485,7 @@ export default function CapitolWatch() {
                           key={t} 
                           onClick={() => setFilterType(t)} 
                           className={cn(
-                            "px-2.5 py-0.5 text-xs font-medium rounded-md transition-all capitalize",
+                            "px-2.5 py-1 text-xs font-medium rounded-md transition-all capitalize",
                             filterType === t ? "bg-white shadow-sm text-primary" : "text-gray-500 hover:text-gray-900"
                           )}
                         >
@@ -499,7 +499,7 @@ export default function CapitolWatch() {
                           key={ch} 
                           onClick={() => setFilterChamber(ch)} 
                           className={cn(
-                            "px-2.5 py-0.5 text-xs font-medium rounded-md transition-all",
+                            "px-2.5 py-1 text-xs font-medium rounded-md transition-all",
                             filterChamber === ch ? "bg-white shadow-sm text-primary" : "text-gray-500 hover:text-gray-900"
                           )}
                         >
@@ -522,7 +522,7 @@ export default function CapitolWatch() {
                       key={f.key}
                       onClick={() => setFilterFlag(f.key)}
                       className={cn(
-                        "px-2.5 py-0.5 rounded-lg text-[11px] font-medium transition-all border",
+                        "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border",
                         filterFlag === f.key
                           ? f.key === "alerts"
                             ? "bg-red-100 text-red-800 border-red-200"
