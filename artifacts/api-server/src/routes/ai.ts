@@ -1,7 +1,18 @@
 import { Router, type IRouter } from "express";
+import rateLimit from "express-rate-limit";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router: IRouter = Router();
+
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "AI rate limit reached, please wait before generating more signals." },
+});
+
+router.use(aiLimiter);
 
 router.post("/ai/signal", async (req, res) => {
   try {

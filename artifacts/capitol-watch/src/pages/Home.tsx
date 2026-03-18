@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import {
+  useGetHealth,
+  useGetTrades,
+  useRefreshCache,
+  generateSignal as apiGenerateSignal,
+  generateSummary as apiGenerateSummary,
+} from "@workspace/api-client-react";
 import { 
   Shield, 
   Bell, 
@@ -127,14 +134,21 @@ function pc(p: string) {
   return map[p] || "bg-gray-100 text-gray-700";
 }
 
-function loadStorage() { 
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; } 
+interface StorageData {
+  watchlist?: string[];
+  watchMembers?: string[];
+  signals?: Record<string, SignalResult>;
+  weekSummary?: string;
 }
-function saveStorage(d: any) { 
+
+function loadStorage(): StorageData { 
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as StorageData; } catch { return {}; } 
+}
+function saveStorage(d: StorageData) { 
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} 
 }
 function loadSeen(): Set<string> { 
-  try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]")); } catch { return new Set(); } 
+  try { return new Set<string>(JSON.parse(localStorage.getItem(SEEN_KEY) || "[]") as string[]); } catch { return new Set(); } 
 }
 function saveSeen(s: Set<string>) { 
   try { localStorage.setItem(SEEN_KEY, JSON.stringify([...s])); } catch {} 
@@ -150,7 +164,6 @@ export default function CapitolWatch() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [usingDemo, setUsingDemo] = useState(true);
-  const [serverHealth, setServerHealth] = useState<{ hasKey: boolean } | null>(null);
 
   const [tab, setTab] = useState("feed");
   const [watchlist, setWatchlist] = useState<string[]>(store.watchlist || []);
@@ -171,19 +184,39 @@ export default function CapitolWatch() {
 
   const seenRef = useRef(loadSeen());
 
+  const { data: healthData } = useGetHealth();
+
+  const {
+    data: tradesData,
+    isLoading: tradesLoading,
+    error: tradesError,
+    refetch: refetchTrades,
+  } = useGetTrades({
+    query: {
+      enabled: !!healthData?.hasKey,
+      retry: 1,
+    },
+  });
+
+  const { mutateAsync: bustCacheMutation } = useRefreshCache();
+
+  useEffect(() => {
+    if (tradesData && Array.isArray(tradesData) && tradesData.length > 0) {
+      setTrades(tradesData as Trade[]);
+      setUsingDemo(false);
+      setFetchError("");
+    } else if (tradesError) {
+      const errMsg = tradesError instanceof Error ? tradesError.message : "Failed to load trades";
+      setFetchError(errMsg);
+      setUsingDemo(true);
+    }
+    if (tradesLoading) setLoading(true);
+    else setLoading(false);
+  }, [tradesData, tradesLoading, tradesError]);
+
   useEffect(() => {
     saveStorage({ watchlist, watchMembers, signals, weekSummary });
   }, [watchlist, watchMembers, signals, weekSummary]);
-
-  useEffect(() => {
-    fetch("/api/health")
-      .then(r => r.json())
-      .then(d => {
-        setServerHealth(d);
-        if (d.hasKey) fetchLiveTrades();
-      })
-      .catch(() => setServerHealth(null));
-  }, []);
 
   useEffect(() => {
     const key = (t: Trade) => `${t.representative}|${t.ticker}|${t.date}`;
@@ -201,23 +234,15 @@ export default function CapitolWatch() {
     setNewAlerts([]);
   }
 
-  async function fetchLiveTrades(bust = false) {
+  async function handleRefresh(bust = false) {
     setLoading(true);
     setFetchError("");
     try {
-      if (bust) await fetch("/api/refresh", { method: "POST" });
-      const res = await fetch("/api/trades");
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      if (Array.isArray(data) && data.length > 0) {
-        setTrades(data);
-        setUsingDemo(false);
-      } else {
-        setUsingDemo(true);
-      }
-    } catch (err: any) {
-      setFetchError(err.message);
+      if (bust) await bustCacheMutation();
+      await refetchTrades();
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : "Refresh failed";
+      setFetchError(errMsg);
       setUsingDemo(true);
     }
     setLoading(false);
@@ -236,21 +261,16 @@ export default function CapitolWatch() {
     const flags = flagTrade(trade);
 
     try {
-      const res = await fetch("/api/ai/signal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker: key,
-          asset: trade.asset,
-          buys,
-          sells,
-          totalValue: val,
-          members,
-          flags,
-          committees: trade.committees || []
-        })
+      const parsed = await apiGenerateSignal({
+        ticker: key,
+        asset: trade.asset,
+        buys,
+        sells,
+        totalValue: val,
+        members,
+        flags,
+        committees: trade.committees || [],
       });
-      const parsed = await res.json();
       setSignals(p => ({ ...p, [key]: parsed }));
     } catch {
       setSignals(p => ({ ...p, [key]: { signal: "Hold", confidence: 50, summary: "Could not generate signal.", flag_note: "" } }));
@@ -260,16 +280,11 @@ export default function CapitolWatch() {
 
   async function generateSummary() {
     setSummaryLoading(true);
-    const top = [...trades].sort((a,b) => amountMid(b.amount)-amountMid(a.amount)).slice(0,10);
+    const top = [...trades].sort((a, b) => amountMid(b.amount) - amountMid(a.amount)).slice(0, 10);
     const digest = top.map(t => `${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount}`).join("\n");
     
     try {
-      const res = await fetch("/api/ai/summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ digest })
-      });
-      const parsed = await res.json();
+      const parsed = await apiGenerateSummary({ digest });
       setWeekSummary(parsed.summary || "Could not parse summary.");
     } catch { 
       setWeekSummary("Could not generate summary."); 
@@ -291,7 +306,8 @@ export default function CapitolWatch() {
     return true;
   });
 
-  const tickerMap: Record<string, any> = {};
+  interface TickerEntry { ticker: string; asset: string; buys: number; sells: number; val: number; members: Set<string>; flagCount: number; }
+  const tickerMap: Record<string, TickerEntry> = {};
   trades.forEach(t => {
     if (!tickerMap[t.ticker]) tickerMap[t.ticker] = { ticker:t.ticker, asset:t.asset, buys:0, sells:0, val:0, members:new Set(), flagCount:0 };
     tickerMap[t.ticker].val += amountMid(t.amount);
@@ -299,15 +315,16 @@ export default function CapitolWatch() {
     isBuy(t) ? tickerMap[t.ticker].buys++ : tickerMap[t.ticker].sells++;
     if (flagTrade(t).length) tickerMap[t.ticker].flagCount++;
   });
-  const topTickers = Object.values(tickerMap).sort((a,b) => b.val-a.val).slice(0, 12);
+  const topTickers = Object.values(tickerMap).sort((a, b) => b.val - a.val).slice(0, 12);
 
-  const memberMap: Record<string, any> = {};
+  interface MemberEntry { name: string; party: string; state: string; chamber: string; trades: number; val: number; }
+  const memberMap: Record<string, MemberEntry> = {};
   trades.forEach(t => {
     if (!memberMap[t.representative]) memberMap[t.representative] = { name:t.representative, party:t.party, state:t.state, chamber:t.chamber, trades:0, val:0 };
     memberMap[t.representative].trades++;
     memberMap[t.representative].val += amountMid(t.amount);
   });
-  const topMembers = Object.values(memberMap).sort((a,b) => b.val-a.val).slice(0, 12);
+  const topMembers = Object.values(memberMap).sort((a, b) => b.val - a.val).slice(0, 12);
   const watchTrades = trades.filter(t => watchlist.includes(t.ticker) || watchMembers.includes(t.representative));
 
   const toggleTicker = (t: string) => setWatchlist(w => w.includes(t) ? w.filter(x => x !== t) : [...w, t]);
@@ -347,7 +364,7 @@ export default function CapitolWatch() {
             )}
             
             <button 
-              onClick={() => fetchLiveTrades(true)}
+              onClick={() => handleRefresh(true)}
               className="px-4 py-2 rounded-lg bg-white border border-border text-sm font-medium hover:bg-gray-50 hover:text-primary transition-all flex items-center gap-2"
               disabled={loading}
             >
