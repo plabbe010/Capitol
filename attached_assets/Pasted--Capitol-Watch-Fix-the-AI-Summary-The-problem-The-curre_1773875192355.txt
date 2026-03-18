@@ -1,0 +1,58 @@
+# Capitol Watch — Fix the AI Summary
+
+## The problem
+The current AI summary is too long, too hedged, and reads like a legal disclaimer.
+It buries the actionable stuff under caveats nobody needs.
+
+## What we want instead
+A "morning briefing" — 3 to 5 bullet points, each one a single punchy sentence.
+Lead with the highest-scoring trades. Skip the disclaimers entirely.
+
+---
+
+## Update the summary prompt
+
+Find where the AI summary prompt is built and replace it with this exact prompt:
+
+```
+You are a sharp analyst writing a daily briefing for a savvy retail investor
+who tracks congressional stock disclosures.
+
+Today's highest-signal trades (scored by unusualness):
+${topTrades}
+
+Write exactly 3–5 bullet points. Each bullet is ONE sentence, max 20 words.
+Rules:
+- Lead with the most unusual/suspicious trade first
+- Name the ticker, the member, and why it's interesting
+- No hedging, no disclaimers, no "retail investors should"
+- No mention of the STOCK Act, 45-day rule, or insider trading laws
+- If a trade scores high because of committee overlap, say which committee
+- If multiple members bought the same obscure stock, call that out explicitly
+- End with one forward-looking sentence about what sector to watch this week
+
+Format: plain bullet points starting with •
+Do not add any headers, bold text, or closing notes.
+```
+
+## How to build `topTrades` for the prompt
+
+Take the top 5 trades by `signalScore`, format each one as:
+```
+[TICKER] ([company name]) — [member name] ([party]) — Score: [N] — Signals: [signal labels joined by ", "]
+```
+
+Example:
+```
+ICHR (Ichor Holdings) — D. Wasserman Schultz (D) — Score: 80 — Signals: Obscure small-cap, Near 52-week low, Filed within 1 day
+LMT (Lockheed Martin) — M. McCaul (R) — Score: 35 — Signals: Armed Services committee, Bipartisan buy
+```
+
+## Display changes
+
+- Show the summary as a clean bulleted list, not a paragraph
+- Each bullet on its own line with a `•` character
+- Font size 13px, line height 1.8, no bold inside the bullets
+- Remove the italic disclaimer line at the bottom entirely
+- The "Generate" / "Refresh" button stays as-is
+- Keep the summary card compact — no extra padding

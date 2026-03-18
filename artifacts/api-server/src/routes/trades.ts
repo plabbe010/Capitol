@@ -4,12 +4,11 @@ import NodeCache from "node-cache";
 
 const router: IRouter = Router();
 
-const cache = new NodeCache({ stdTTL: 900 });
+const cache     = new NodeCache({ stdTTL: 900 });   // 15-min trades cache
+const priceCache = new NodeCache({ stdTTL: 3600 });  // 60-min price cache
 
-const QUIVER_URL =
-  "https://api.quiverquant.com/beta/live/congresstrading";
-
-const CACHE_KEY = "quiver_congress";
+const QUIVER_URL = "https://api.quiverquant.com/beta/live/congresstrading";
+const CACHE_KEY  = "quiver_congress";
 
 const AMOUNT_MID: Record<string, number> = {
   "$1,001 - $15,000": 8000,
@@ -22,12 +21,24 @@ const AMOUNT_MID: Record<string, number> = {
   "Over $5,000,000": 5000000,
 };
 
+// ── Known large-cap tickers (trigger −40 household-name discount) ─────────────
+const LARGE_CAPS = new Set([
+  "AAPL","MSFT","GOOGL","GOOG","AMZN","META","TSLA","NVDA","BRK.A","BRK.B",
+  "JPM","JNJ","V","UNH","XOM","PG","MA","HD","CVX","MRK","ABBV","LLY","PFE",
+  "KO","PEP","BAC","TMO","AVGO","COST","DIS","ABT","WMT","MCD","CSCO","ACN",
+  "DHR","NEE","TXN","BMY","AMGN","RTX","HON","UPS","PM","T","VZ","INTC",
+  "QCOM","IBM","GE","CAT","BA","GS","MS","C","WFC","AMD","ORCL","CRM","NFLX",
+]);
+
 const TICKER_SECTOR: Record<string, string> = {
   LMT: "defense", RTX: "defense", NOC: "defense", BA: "defense", GD: "defense", LHX: "defense", HII: "defense",
-  XOM: "energy", CVX: "energy", COP: "energy", OXY: "energy", SLB: "energy", MPC: "energy", PSX: "energy",
-  NVDA: "tech", MSFT: "tech", GOOGL: "tech", GOOG: "tech", AAPL: "tech", AMZN: "tech", META: "tech", ORCL: "tech", IBM: "tech", INTC: "tech", AMD: "tech", QCOM: "tech",
-  PFE: "health", JNJ: "health", MRK: "health", ABBV: "health", LLY: "health", BMY: "health", AMGN: "health", UNH: "health", CVS: "health", HCA: "health",
-  JPM: "finance", GS: "finance", MS: "finance", BAC: "finance", WFC: "finance", C: "finance", BLK: "finance", SCHW: "finance",
+  XOM: "energy",  CVX: "energy",  COP: "energy",  OXY: "energy",  SLB: "energy",  MPC: "energy",  PSX: "energy",
+  NVDA: "tech",   MSFT: "tech",   GOOGL: "tech",  GOOG: "tech",   AAPL: "tech",   AMZN: "tech",
+  META: "tech",   ORCL: "tech",   IBM: "tech",    INTC: "tech",   AMD: "tech",    QCOM: "tech",
+  PFE: "health",  JNJ: "health",  MRK: "health",  ABBV: "health", LLY: "health",  BMY: "health",
+  AMGN: "health", UNH: "health",  CVS: "health",  HCA: "health",
+  JPM: "finance", GS: "finance",  MS: "finance",  BAC: "finance", WFC: "finance", C: "finance",
+  BLK: "finance", SCHW: "finance",
 };
 
 const SECTOR_COMMITTEE: Record<string, string[]> = {
@@ -74,10 +85,10 @@ const MEMBER_COMMITTEES: Record<string, string[]> = {
   "Kurt Schrader":              ["Energy & Commerce"],
   "Gil Cisneros":               ["Armed Services"],
   "Gilbert Cisneros":           ["Armed Services"],
+  "Julia Letlow":               ["Armed Services", "Agriculture"],
 };
 
-const LARGE_CAP_TICKERS = new Set(Object.keys(TICKER_SECTOR));
-
+// ── Interfaces ────────────────────────────────────────────────────────────────
 interface RawQuiverTrade {
   Representative?: string;
   BioGuideID?: string;
@@ -97,6 +108,11 @@ interface RawQuiverTrade {
   SPYChange?: number | null;
 }
 
+interface ScoreSignal {
+  label: string;
+  pts: number;
+}
+
 interface Trade {
   ticker: string;
   asset: string;
@@ -109,10 +125,19 @@ interface Trade {
   date: string;
   filed: string;
   committees: string[];
-  flagTier: "alert" | "flag" | null;
-  flagReasons: string[];
+  signalScore: number;
+  tier: "diamond" | "high" | "watch" | "low";
+  signals: ScoreSignal[];
+  noise: ScoreSignal[];
 }
 
+interface PriceData {
+  low52: number;
+  high52: number;
+  currentPrice: number;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtMoney(n: number): string {
   if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
@@ -134,97 +159,167 @@ function amountMid(s: string): number {
   return AMOUNT_MID[s] ?? 8000;
 }
 
-function computeFlags(trade: Trade, allTrades: Trade[]): { flagTier: "alert" | "flag" | null; flagReasons: string[] } {
-  const alertReasons: string[] = [];
-  const flagReasons: string[] = [];
+// ── Price data fetching ───────────────────────────────────────────────────────
+async function fetchPriceData(tickers: string[]): Promise<Record<string, PriceData>> {
+  const PRICE_CACHE_KEY = `prices:${tickers.sort().join(",")}`;
+  const cached = priceCache.get<Record<string, PriceData>>(PRICE_CACHE_KEY);
+  if (cached) return cached;
 
-  const gap = (trade.date && trade.filed) ? daysBetween(trade.date, trade.filed) : 0;
-  const mid = amountMid(trade.amount);
-  const isThisBuy = isBuy(trade.type);
+  const result: Record<string, PriceData> = {};
 
-  // ── ALERT CONDITIONS ────────────────────────────────────────────────────────
+  const fetches = tickers.slice(0, 50).map(async (ticker) => {
+    const tickerKey = `price:${ticker}`;
+    const hit = priceCache.get<PriceData>(tickerKey);
+    if (hit) { result[ticker] = hit; return; }
 
-  // 1. Bipartisan buy — 2+ distinct opposite-party members bought same ticker within 14 days
-  // (Requires 2+ members to avoid false positives from common large-cap stocks)
-  if (isThisBuy && (trade.party === "D" || trade.party === "R")) {
-    const oppositeParty = trade.party === "D" ? "R" : "D";
-    const oppositeMembers = [
-      ...new Set(
-        allTrades
-          .filter(
-            t =>
-              t.ticker === trade.ticker &&
-              t.party === oppositeParty &&
-              isBuy(t.type) &&
-              t.representative !== trade.representative &&
-              daysBetween(trade.date, t.date) <= 14
-          )
-          .map(t => t.representative)
-      ),
-    ];
-    if (oppositeMembers.length >= 2) {
-      alertReasons.push(
-        `Bipartisan signal — 2+ opposite-party members buying the same ticker within 14 days`
-      );
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`;
+      const res = await axios.get<{chart?: {result?: Array<{meta?: {fiftyTwoWeekLow?: number; fiftyTwoWeekHigh?: number; regularMarketPrice?: number}}>}}>(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; CapitolWatch/1.0)",
+          "Accept": "application/json",
+        },
+        timeout: 8000,
+      });
+      const meta = res.data?.chart?.result?.[0]?.meta;
+      if (meta?.fiftyTwoWeekLow && meta?.regularMarketPrice) {
+        const pd: PriceData = {
+          low52: meta.fiftyTwoWeekLow,
+          high52: meta.fiftyTwoWeekHigh ?? meta.regularMarketPrice,
+          currentPrice: meta.regularMarketPrice,
+        };
+        priceCache.set(tickerKey, pd);
+        result[ticker] = pd;
+      }
+    } catch {
+      // non-fatal — skip this ticker
     }
+  });
+
+  await Promise.allSettled(fetches);
+  priceCache.set(PRICE_CACHE_KEY, result);
+  return result;
+}
+
+// ── Scoring engine ────────────────────────────────────────────────────────────
+function computeScore(
+  trade: Omit<Trade, "signalScore" | "tier" | "signals" | "noise">,
+  allTrades: Omit<Trade, "signalScore" | "tier" | "signals" | "noise">[],
+  priceData: Record<string, PriceData>
+): { signalScore: number; tier: "diamond" | "high" | "watch" | "low"; signals: ScoreSignal[]; noise: ScoreSignal[] } {
+  const signals: ScoreSignal[] = [];
+  const noise: ScoreSignal[]   = [];
+
+  const gap        = (trade.date && trade.filed) ? daysBetween(trade.date, trade.filed) : 0;
+  const isThisBuy  = isBuy(trade.type);
+  const isLargeCap = LARGE_CAPS.has(trade.ticker);
+  const isSell     = !isThisBuy;
+
+  // ── ADDITIVE SIGNALS ────────────────────────────────────────────────────────
+
+  // 1. Obscure / small-cap ticker (+30) — purchase only
+  if (isThisBuy && !isLargeCap) {
+    signals.push({ label: "Obscure small-cap", pts: 30 });
   }
 
-  // 2. Committee/sector overlap
+  // 2. Committee/sector overlap (+20)
   const sector = TICKER_SECTOR[trade.ticker];
   if (sector) {
-    const memberCommittees = MEMBER_COMMITTEES[trade.representative] || [];
-    const sectorCommittees = SECTOR_COMMITTEE[sector] || [];
+    const memberCommittees  = MEMBER_COMMITTEES[trade.representative] || [];
+    const sectorCommittees  = SECTOR_COMMITTEE[sector] || [];
     const overlap = memberCommittees.find(mc =>
       sectorCommittees.some(sc => mc.includes(sc) || sc.includes(mc))
     );
     if (overlap) {
-      alertReasons.push(`On ${overlap} committee — directly oversees this sector`);
+      signals.push({ label: `On ${overlap} — oversees ${sector} sector`, pts: 20 });
     }
   }
 
-  // 3. Filed at or near the 45-day legal limit
+  // 3. Bipartisan buy (+15) — any D & R bought same ticker within 30 days
+  if (isThisBuy && (trade.party === "D" || trade.party === "R")) {
+    const oppositeParty = trade.party === "D" ? "R" : "D";
+    const hasOpposite = allTrades.some(
+      t =>
+        t.ticker === trade.ticker &&
+        t.party === oppositeParty &&
+        isBuy(t.type) &&
+        t.representative !== trade.representative &&
+        daysBetween(trade.date, t.date) <= 30
+    );
+    if (hasOpposite) {
+      signals.push({ label: "Bipartisan buy — D & R both purchasing within 30 days", pts: 15 });
+    }
+  }
+
+  // 4. Near 52-week low (+15)
+  const pd = priceData[trade.ticker];
+  if (pd && pd.currentPrice <= pd.low52 * 1.20) {
+    signals.push({ label: "Trading near 52-week low", pts: 15 });
+  }
+
+  // 5. Multiple members buying same obscure ticker (+25)
+  if (isThisBuy && !isLargeCap) {
+    const otherBuyers = new Set(
+      allTrades
+        .filter(t => t.ticker === trade.ticker && isBuy(t.type) && t.representative !== trade.representative)
+        .map(t => t.representative)
+    );
+    if (otherBuyers.size >= 1) {
+      signals.push({ label: `${otherBuyers.size + 1} members buying this obscure ticker`, pts: 25 });
+    }
+  }
+
+  // 6. Filed quickly (+10) — 5 days or fewer
+  if (gap > 0 && gap <= 5 && trade.date && trade.filed) {
+    signals.push({ label: `Filed within ${gap} day${gap === 1 ? "" : "s"} — unusually prompt`, pts: 10 });
+  }
+
+  // 7. Near the 45-day legal limit (+8) — 40+ days
   if (gap >= 40 && trade.date && trade.filed) {
-    alertReasons.push(`Filed ${gap} days after trade — pushed to the legal limit (45d max)`);
+    signals.push({ label: `Filed ${gap}d after trade — near the 45-day limit`, pts: 8 });
   }
 
-  // ── FLAG CONDITIONS (only if no alerts) ────────────────────────────────────
-  if (alertReasons.length === 0) {
-    // 1. Large/notable position
-    if (mid >= 250000) {
-      flagReasons.push(`Large position — ~${fmtMoney(mid)} disclosed`);
-    } else if (mid >= 50000) {
-      const memberTrades = allTrades.filter(t => t.representative === trade.representative);
-      const avgMid =
-        memberTrades.length > 0
-          ? memberTrades.reduce((s, t) => s + amountMid(t.amount), 0) / memberTrades.length
-          : 0;
-      if (avgMid > 0 && mid > avgMid * 3) {
-        flagReasons.push(`3× larger than this member's typical trade`);
-      } else {
-        flagReasons.push(`Notable size — ~${fmtMoney(mid)} disclosed`);
-      }
-    }
+  // ── SUBTRACTIVE NOISE ───────────────────────────────────────────────────────
 
-    // 2. Slow disclosure (30-39 days)
-    if (gap >= 30 && gap < 40 && trade.date && trade.filed) {
-      flagReasons.push(`Slow to disclose — ${gap} days between trade and filing`);
-    }
-
-    // 3. Obscure/small-cap ticker (purchase only)
-    if (isThisBuy && !LARGE_CAP_TICKERS.has(trade.ticker)) {
-      flagReasons.push(`Obscure or small-cap ticker — not a typical congressional pick`);
-    }
+  // 1. Household name ticker (−40)
+  if (isLargeCap) {
+    noise.push({ label: "Household name ticker", pts: -40 });
   }
 
-  if (alertReasons.length > 0) {
-    return { flagTier: "alert", flagReasons: alertReasons };
+  // 2. High-volume congressional stock (−15) — 10+ trades in dataset
+  const tickerCount = allTrades.filter(t => t.ticker === trade.ticker).length;
+  if (tickerCount >= 10) {
+    noise.push({ label: "Frequently traded by Congress", pts: -15 });
   }
-  if (flagReasons.length > 0) {
-    return { flagTier: "flag", flagReasons: flagReasons };
+
+  // 3. Known frequent trader (−15) — 20+ trades in dataset
+  const memberCount = allTrades.filter(t => t.representative === trade.representative).length;
+  if (memberCount >= 20) {
+    noise.push({ label: "High-volume congressional trader", pts: -15 });
   }
-  return { flagTier: null, flagReasons: [] };
+
+  // 4. Sell transaction (−10)
+  if (isSell) {
+    noise.push({ label: "Sell transaction (less predictive)", pts: -10 });
+  }
+
+  // ── FINAL SCORE ─────────────────────────────────────────────────────────────
+  const raw = [
+    ...signals.map(s => s.pts),
+    ...noise.map(n => n.pts),
+  ].reduce((a, b) => a + b, 0);
+
+  const signalScore = Math.min(100, Math.max(0, raw));
+
+  const tier: "diamond" | "high" | "watch" | "low" =
+    signalScore >= 60 ? "diamond" :
+    signalScore >= 40 ? "high"    :
+    signalScore >= 20 ? "watch"   : "low";
+
+  return { signalScore, tier, signals, noise };
 }
 
+// ── Data fetching ─────────────────────────────────────────────────────────────
 async function fetchAll(): Promise<RawQuiverTrade[]> {
   const cached = cache.get<RawQuiverTrade[]>(CACHE_KEY);
   if (cached) {
@@ -241,27 +336,26 @@ async function fetchAll(): Promise<RawQuiverTrade[]> {
   return data;
 }
 
-function normalizeRecord(t: RawQuiverTrade): Trade {
+function normalizeRecord(t: RawQuiverTrade): Omit<Trade, "signalScore" | "tier" | "signals" | "noise"> {
   const chamber = t.House === "Senators" ? "Senate" : "House";
   return {
-    ticker: t.Ticker || "—",
-    asset: t.Description || "—",
+    ticker:         t.Ticker || "—",
+    asset:          t.Description || "—",
     representative: t.Representative || "Unknown",
-    party: t.Party || "?",
-    state: "—",
+    party:          t.Party || "?",
+    state:          "—",
     chamber,
-    type: t.Transaction || "Purchase",
-    amount: t.Range || "$1,001 - $15,000",
-    date: t.TransactionDate || "",
-    filed: t.ReportDate || "",
-    committees: [],
-    flagTier: null,
-    flagReasons: [],
+    type:           t.Transaction || "Purchase",
+    amount:         t.Range || "$1,001 - $15,000",
+    date:           t.TransactionDate || "",
+    filed:          t.ReportDate || "",
+    committees:     [],
   };
 }
 
 export { cache };
 
+// ── Routes ────────────────────────────────────────────────────────────────────
 router.get("/trades", async (_req, res) => {
   try {
     const raw = await fetchAll();
@@ -271,20 +365,23 @@ router.get("/trades", async (_req, res) => {
       .map(normalizeRecord)
       .filter((t) => t.ticker && t.ticker !== "—" && t.date);
 
-    const enriched = normalized.map((trade) => {
-      const { flagTier, flagReasons } = computeFlags(trade, normalized);
-      return { ...trade, flagTier, flagReasons };
+    // Fetch price data in parallel (non-blocking)
+    const uniqueTickers = [...new Set(normalized.map(t => t.ticker))].slice(0, 50);
+    const priceData = await fetchPriceData(uniqueTickers).catch(() => ({}));
+
+    const enriched: Trade[] = normalized.map((trade) => {
+      const { signalScore, tier, signals, noise } = computeScore(trade, normalized, priceData);
+      return { ...trade, signalScore, tier, signals, noise };
     });
 
-    const tierOrder = (t: Trade) => (t.flagTier === "alert" ? 0 : t.flagTier === "flag" ? 1 : 2);
-
+    // Sort by signalScore descending; ties broken by date (newest first)
     const sorted = enriched
       .sort((a, b) => {
-        const tierDiff = tierOrder(a) - tierOrder(b);
-        if (tierDiff !== 0) return tierDiff;
+        const scoreDiff = b.signalScore - a.signalScore;
+        if (scoreDiff !== 0) return scoreDiff;
         return new Date(b.date).getTime() - new Date(a.date).getTime();
       })
-      .slice(0, 150);
+      .slice(0, 200);
 
     res.json(sorted);
   } catch (err) {
@@ -294,11 +391,9 @@ router.get("/trades", async (_req, res) => {
   }
 });
 
-// /house and /senate return normalized records WITHOUT flag enrichment.
-// computeFlags() requires the full combined dataset for bipartisan context
-// (counting opposite-party members across both chambers); these chamber-
-// filtered views don't have that cross-chamber data.
-// Consumers that need flagTier/flagReasons should use /trades instead.
+// /house and /senate return normalized records without score enrichment.
+// computeScore() requires the full combined dataset for bipartisan context.
+// Consumers that need scored data should use /trades instead.
 router.get("/house", async (_req, res) => {
   try {
     const raw = await fetchAll();
@@ -329,6 +424,7 @@ router.get("/senate", async (_req, res) => {
 
 router.post("/refresh", (_req, res) => {
   cache.flushAll();
+  priceCache.flushAll();
   res.json({ ok: true, message: "Cache cleared" });
 });
 

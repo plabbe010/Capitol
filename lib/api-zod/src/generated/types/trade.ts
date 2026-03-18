@@ -6,6 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export interface ScoreSignal {
+  label: string;
+  pts: number;
+}
+
 export interface Trade {
   ticker: string;
   asset: string;
@@ -18,6 +23,8 @@ export interface Trade {
   date: string;
   filed: string;
   committees: string[];
-  flagTier: "alert" | "flag" | null;
-  flagReasons: string[];
+  signalScore: number;
+  tier: "diamond" | "high" | "watch" | "low";
+  signals: ScoreSignal[];
+  noise: ScoreSignal[];
 }

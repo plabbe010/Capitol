@@ -14,15 +14,21 @@ import {
   RefreshCw, 
   Star, 
   Search, 
-  Flag,
   ChevronRight,
   TrendingUp,
   Activity,
   AlertCircle,
-  X
+  X,
+  Gem,
+  ChevronDown,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+export interface ScoreSignal {
+  label: string;
+  pts: number;
+}
+
 export interface Trade {
   ticker: string;
   asset: string;
@@ -35,9 +41,10 @@ export interface Trade {
   date: string;
   filed: string;
   committees?: string[];
-  isMemberFirst?: boolean;
-  flagTier?: "alert" | "flag" | null;
-  flagReasons?: string[];
+  signalScore: number;
+  tier: "diamond" | "high" | "watch" | "low";
+  signals: ScoreSignal[];
+  noise: ScoreSignal[];
 }
 
 export interface SignalResult {
@@ -48,31 +55,144 @@ export interface SignalResult {
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const STORAGE_KEY = "capitolwatch_v2";
+const STORAGE_KEY = "capitolwatch_v3";
 const SEEN_KEY    = "capitolwatch_seen";
 
-const DEMO_TRADES: Trade[] = [
-  { ticker:"ICHR", asset:"Ichor Holdings", representative:"Debbie Wasserman Schultz", party:"D", state:"FL", chamber:"House", type:"Purchase", amount:"$1,001 - $15,000", date:"2025-08-05", filed:"2025-08-28", committees:["Appropriations","Energy & Water"], isMemberFirst:true, flagTier:"alert", flagReasons:["On Appropriations committee — directly oversees this sector"] },
-  { ticker:"NVDA", asset:"NVIDIA Corporation", representative:"Nancy Pelosi", party:"D", state:"CA", chamber:"House", type:"Purchase", amount:"$1,000,001 - $5,000,000", date:"2026-01-15", filed:"2026-02-10", committees:["Financial Services"], isMemberFirst:false, flagTier:"flag", flagReasons:["Large position — ~$3M disclosed"] },
-  { ticker:"LMT", asset:"Lockheed Martin", representative:"Michael McCaul", party:"R", state:"TX", chamber:"House", type:"Purchase", amount:"$250,001 - $500,000", date:"2026-01-22", filed:"2026-02-18", committees:["Armed Services","Foreign Affairs"], isMemberFirst:false, flagTier:"alert", flagReasons:["On Armed Services committee — directly oversees this sector"] },
-  { ticker:"XOM", asset:"Exxon Mobil", representative:"Dan Crenshaw", party:"R", state:"TX", chamber:"House", type:"Purchase", amount:"$50,001 - $100,000", date:"2026-01-20", filed:"2026-02-14", committees:["Energy & Commerce"], isMemberFirst:false, flagTier:"alert", flagReasons:["On Energy & Commerce committee — directly oversees this sector"] },
-  { ticker:"AMZN", asset:"Amazon.com Inc", representative:"Nancy Pelosi", party:"D", state:"CA", chamber:"House", type:"Purchase", amount:"$500,001 - $1,000,000", date:"2026-01-03", filed:"2026-01-28", committees:["Financial Services"], isMemberFirst:false, flagTier:"flag", flagReasons:["Large position — ~$750K disclosed"] },
-  { ticker:"SSYS", asset:"Stratasys Ltd", representative:"Debbie Wasserman Schultz", party:"D", state:"FL", chamber:"House", type:"Purchase", amount:"$1,001 - $15,000", date:"2025-08-15", filed:"2025-09-02", committees:["Appropriations"], isMemberFirst:true, flagTier:"flag", flagReasons:["Obscure or small-cap ticker — not a typical congressional pick"] },
-  { ticker:"BA", asset:"Boeing Co", representative:"Kevin McCarthy", party:"R", state:"CA", chamber:"House", type:"Purchase", amount:"$500,001 - $1,000,000", date:"2026-02-03", filed:"2026-02-28", committees:["Rules"], isMemberFirst:false, flagTier:"flag", flagReasons:["Large position — ~$750K disclosed"] },
-  { ticker:"MSFT", asset:"Microsoft Corp", representative:"Josh Gottheimer", party:"D", state:"NJ", chamber:"House", type:"Purchase", amount:"$15,001 - $50,000", date:"2026-01-12", filed:"2026-02-05", committees:["Financial Services"], isMemberFirst:false, flagTier:null, flagReasons:[] },
-  { ticker:"PFE", asset:"Pfizer Inc", representative:"Katie Porter", party:"D", state:"CA", chamber:"House", type:"Sale (Full)", amount:"$50,001 - $100,000", date:"2026-01-30", filed:"2026-02-24", committees:["Oversight"], isMemberFirst:false, flagTier:null, flagReasons:[] },
-  { ticker:"TSLA", asset:"Tesla Inc", representative:"Marjorie Taylor Greene", party:"R", state:"GA", chamber:"House", type:"Purchase", amount:"$1,001 - $15,000", date:"2026-02-01", filed:"2026-02-25", committees:["Oversight","Homeland Security"], isMemberFirst:false, flagTier:null, flagReasons:[] },
-  { ticker:"CVX", asset:"Chevron Corp", representative:"Dan Crenshaw", party:"R", state:"TX", chamber:"House", type:"Purchase", amount:"$15,001 - $50,000", date:"2026-01-28", filed:"2026-02-22", committees:["Energy & Commerce"], isMemberFirst:false, flagTier:"alert", flagReasons:["On Energy & Commerce committee — directly oversees this sector"] },
-  { ticker:"GOOGL", asset:"Alphabet Inc", representative:"Suzan DelBene", party:"D", state:"WA", chamber:"House", type:"Purchase", amount:"$250,001 - $500,000", date:"2026-01-25", filed:"2026-02-20", committees:["Ways & Means","Agriculture"], isMemberFirst:false, flagTier:"flag", flagReasons:["Large position — ~$375K disclosed"] },
-];
+// Tier display config
+const TIER_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; textClass: string }> = {
+  diamond: { label: "💎 Diamond", color: "#378ADD", bg: "bg-blue-50",   border: "border-blue-200",  textClass: "text-blue-700"  },
+  high:    { label: "📈 High",    color: "#639922", bg: "bg-green-50",  border: "border-green-200", textClass: "text-green-700" },
+  watch:   { label: "👁 Watch",   color: "#BA7517", bg: "bg-amber-50",  border: "border-amber-200", textClass: "text-amber-700" },
+  low:     { label: "— Low",      color: "#888780", bg: "bg-gray-50",   border: "border-gray-200",  textClass: "text-gray-500"  },
+};
 
 const SIGNAL_STYLE = {
   "Strong Buy":  { bg: "bg-green-100", color: "text-green-800", dot: "bg-green-500", border: "border-green-200" },
-  "Buy":         { bg: "bg-blue-50", color: "text-blue-700", dot: "bg-blue-500", border: "border-blue-200" },
-  "Hold":        { bg: "bg-yellow-50", color: "text-yellow-700", dot: "bg-yellow-500", border: "border-yellow-200" },
-  "Sell":        { bg: "bg-orange-50", color: "text-orange-700", dot: "bg-orange-500", border: "border-orange-200" },
-  "Strong Sell": { bg: "bg-red-100", color: "text-red-800", dot: "bg-red-500", border: "border-red-200" },
+  "Buy":         { bg: "bg-blue-50",   color: "text-blue-700",  dot: "bg-blue-500",  border: "border-blue-200"  },
+  "Hold":        { bg: "bg-yellow-50", color: "text-yellow-700",dot: "bg-yellow-500",border: "border-yellow-200"},
+  "Sell":        { bg: "bg-orange-50", color: "text-orange-700",dot: "bg-orange-500",border: "border-orange-200"},
+  "Strong Sell": { bg: "bg-red-100",   color: "text-red-800",   dot: "bg-red-500",   border: "border-red-200"   },
 };
+
+// Demo trades with new scoring schema
+const DEMO_TRADES: Trade[] = [
+  {
+    ticker:"SSYS", asset:"Stratasys Ltd", representative:"Debbie Wasserman Schultz", party:"D", state:"FL", chamber:"House",
+    type:"Purchase", amount:"$1,001 - $15,000", date:"2026-01-20", filed:"2026-01-21", committees:["Appropriations"],
+    signalScore:70, tier:"diamond",
+    signals:[
+      {label:"Obscure small-cap", pts:30},
+      {label:"2 members buying this obscure ticker", pts:25},
+      {label:"Bipartisan buy — D & R both purchasing within 30 days", pts:15},
+    ],
+    noise:[],
+  },
+  {
+    ticker:"SSYS", asset:"Stratasys Ltd", representative:"Julia Letlow", party:"R", state:"LA", chamber:"House",
+    type:"Purchase", amount:"$1,001 - $15,000", date:"2026-01-25", filed:"2026-01-27", committees:["Armed Services","Agriculture"],
+    signalScore:70, tier:"diamond",
+    signals:[
+      {label:"Obscure small-cap", pts:30},
+      {label:"2 members buying this obscure ticker", pts:25},
+      {label:"Bipartisan buy — D & R both purchasing within 30 days", pts:15},
+    ],
+    noise:[],
+  },
+  {
+    ticker:"LMT", asset:"Lockheed Martin Corp", representative:"Michael McCaul", party:"R", state:"TX", chamber:"House",
+    type:"Purchase", amount:"$250,001 - $500,000", date:"2026-01-22", filed:"2026-02-18", committees:["Foreign Affairs"],
+    signalScore:50, tier:"high",
+    signals:[
+      {label:"Obscure small-cap", pts:30},
+      {label:"On Foreign Affairs — oversees defense sector", pts:20},
+      {label:"Bipartisan buy — D & R both purchasing within 30 days", pts:15},
+    ],
+    noise:[{label:"Frequently traded by Congress", pts:-15}],
+  },
+  {
+    ticker:"LMT", asset:"Lockheed Martin Corp", representative:"Ro Khanna", party:"D", state:"CA", chamber:"House",
+    type:"Purchase", amount:"$15,001 - $50,000", date:"2026-01-28", filed:"2026-02-24", committees:["Armed Services","Science, Space & Technology"],
+    signalScore:50, tier:"high",
+    signals:[
+      {label:"Obscure small-cap", pts:30},
+      {label:"On Armed Services — oversees defense sector", pts:20},
+      {label:"Bipartisan buy — D & R both purchasing within 30 days", pts:15},
+    ],
+    noise:[{label:"Frequently traded by Congress", pts:-15}],
+  },
+  {
+    ticker:"AEHR", asset:"Aehr Test Systems Inc", representative:"Marjorie Taylor Greene", party:"R", state:"GA", chamber:"House",
+    type:"Purchase", amount:"$1,001 - $15,000", date:"2026-02-10", filed:"2026-02-11", committees:["Oversight","Homeland Security"],
+    signalScore:40, tier:"high",
+    signals:[
+      {label:"Obscure small-cap", pts:30},
+      {label:"Filed within 1 day — unusually prompt", pts:10},
+    ],
+    noise:[],
+  },
+  {
+    ticker:"OXY", asset:"Occidental Petroleum Corp", representative:"Dan Crenshaw", party:"R", state:"TX", chamber:"House",
+    type:"Purchase", amount:"$15,001 - $50,000", date:"2026-01-05", filed:"2026-02-18", committees:["Armed Services","Energy & Commerce"],
+    signalScore:28, tier:"watch",
+    signals:[
+      {label:"On Energy & Commerce — oversees energy sector", pts:20},
+      {label:"Filed 44d after trade — near the 45-day limit", pts:8},
+    ],
+    noise:[],
+  },
+  {
+    ticker:"ICHR", asset:"Ichor Holdings Ltd", representative:"Gilbert Cisneros", party:"D", state:"CA", chamber:"House",
+    type:"Purchase", amount:"$1,001 - $15,000", date:"2025-12-10", filed:"2026-01-21", committees:["Armed Services"],
+    signalScore:38, tier:"watch",
+    signals:[
+      {label:"Obscure small-cap", pts:30},
+      {label:"Filed 42d after trade — near the 45-day limit", pts:8},
+    ],
+    noise:[],
+  },
+  {
+    ticker:"AMZN", asset:"Amazon.com Inc", representative:"Nancy Pelosi", party:"D", state:"CA", chamber:"House",
+    type:"Purchase", amount:"$500,001 - $1,000,000", date:"2026-01-03", filed:"2026-01-28", committees:["Financial Services"],
+    signalScore:0, tier:"low",
+    signals:[],
+    noise:[
+      {label:"Household name ticker", pts:-40},
+      {label:"Frequently traded by Congress", pts:-15},
+      {label:"High-volume congressional trader", pts:-15},
+    ],
+  },
+  {
+    ticker:"NVDA", asset:"NVIDIA Corporation", representative:"Josh Gottheimer", party:"D", state:"NJ", chamber:"House",
+    type:"Purchase", amount:"$15,001 - $50,000", date:"2026-01-12", filed:"2026-02-05", committees:["Financial Services"],
+    signalScore:0, tier:"low",
+    signals:[],
+    noise:[
+      {label:"Household name ticker", pts:-40},
+      {label:"Frequently traded by Congress", pts:-15},
+    ],
+  },
+  {
+    ticker:"PFE", asset:"Pfizer Inc", representative:"Katie Porter", party:"D", state:"CA", chamber:"House",
+    type:"Sale (Full)", amount:"$50,001 - $100,000", date:"2026-01-30", filed:"2026-02-24", committees:["Oversight"],
+    signalScore:0, tier:"low",
+    signals:[],
+    noise:[
+      {label:"Household name ticker", pts:-40},
+      {label:"Sell transaction (less predictive)", pts:-10},
+      {label:"Frequently traded by Congress", pts:-15},
+    ],
+  },
+  {
+    ticker:"MSFT", asset:"Microsoft Corp", representative:"Kevin McCarthy", party:"R", state:"CA", chamber:"House",
+    type:"Purchase", amount:"$15,001 - $50,000", date:"2026-02-03", filed:"2026-02-28", committees:["Rules"],
+    signalScore:0, tier:"low",
+    signals:[],
+    noise:[
+      {label:"Household name ticker", pts:-40},
+      {label:"Frequently traded by Congress", pts:-15},
+    ],
+  },
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function amountMid(s: string) {
@@ -150,7 +270,8 @@ export default function CapitolWatch() {
   const [filterParty, setFilterParty] = useState("All");
   const [filterType, setFilterType] = useState("All");
   const [filterChamber, setFilterChamber] = useState("All");
-  const [filterFlag, setFilterFlag] = useState("All");
+  const [filterTier, setFilterTier] = useState("All");
+  const [filterScore, setFilterScore] = useState(20); // default 20+ threshold
   const [search, setSearch] = useState("");
 
   const [signals, setSignals] = useState<Record<string, SignalResult>>(store.signals || {});
@@ -238,7 +359,7 @@ export default function CapitolWatch() {
     const sells = related.length - buys;
     const val = related.reduce((s, t) => s + amountMid(t.amount), 0);
     const members = [...new Set(related.map(t => t.representative))];
-    const flags = trade.flagReasons || [];
+    const flags = (trade.signals || []).map(s => s.label);
 
     try {
       const parsed = await apiGenerateSignal({
@@ -261,25 +382,25 @@ export default function CapitolWatch() {
   async function generateSummary() {
     setSummaryLoading(true);
 
-    const alertTrades = trades.filter(t => t.flagTier === "alert");
-    const flaggedTrades = trades.filter(t => t.flagTier === "flag");
-    const normalTrades = trades.filter(t => !t.flagTier);
+    const diamondTrades = trades.filter(t => t.tier === "diamond");
+    const highTrades    = trades.filter(t => t.tier === "high");
+    const otherTrades   = trades.filter(t => t.tier === "watch" || t.tier === "low");
 
-    const topAlerts = alertTrades.slice(0, 5).map(t =>
-      `🔴 ALERT: ${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount} | Reason: ${(t.flagReasons || []).join("; ")}`
+    const topDiamond = diamondTrades.slice(0, 5).map(t =>
+      `💎 DIAMOND (${t.signalScore}): ${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount} | Signals: ${(t.signals||[]).map(s=>s.label).join("; ")}`
     );
-    const topFlagged = flaggedTrades.slice(0, 3).map(t =>
-      `🟡 FLAGGED: ${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount} | Reason: ${(t.flagReasons || []).join("; ")}`
+    const topHigh = highTrades.slice(0, 3).map(t =>
+      `📈 HIGH (${t.signalScore}): ${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount} | Signals: ${(t.signals||[]).map(s=>s.label).join("; ")}`
     );
-    const topNormal = normalTrades
+    const topOther = otherTrades
       .sort((a, b) => amountMid(b.amount) - amountMid(a.amount))
       .slice(0, 5)
       .map(t => `${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount}`);
 
     const digest = [
-      topAlerts.length ? `HIGH ALERT TRADES:\n${topAlerts.join("\n")}` : "",
-      topFlagged.length ? `FLAGGED TRADES:\n${topFlagged.join("\n")}` : "",
-      topNormal.length ? `OTHER NOTABLE TRADES:\n${topNormal.join("\n")}` : "",
+      topDiamond.length ? `DIAMOND TIER TRADES:\n${topDiamond.join("\n")}` : "",
+      topHigh.length    ? `HIGH SIGNAL TRADES:\n${topHigh.join("\n")}` : "",
+      topOther.length   ? `OTHER NOTABLE TRADES:\n${topOther.join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
     
     try {
@@ -292,12 +413,20 @@ export default function CapitolWatch() {
   }
 
   // ── Derived State ───────────────────────────────────────────────────────────
-  const filtered = trades.filter(t => {
+  // Trades are already sorted by signalScore descending from the backend.
+  // For demo data, sort them client-side as well.
+  const sortedTrades = [...trades].sort((a, b) => {
+    const scoreDiff = b.signalScore - a.signalScore;
+    if (scoreDiff !== 0) return scoreDiff;
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
+
+  const filtered = sortedTrades.filter(t => {
     if (filterParty !== "All" && t.party !== filterParty) return false;
     if (filterType !== "All" && !t.type.toLowerCase().includes(filterType)) return false;
     if (filterChamber !== "All" && t.chamber !== filterChamber) return false;
-    if (filterFlag === "alerts" && t.flagTier !== "alert") return false;
-    if (filterFlag === "flagged" && !t.flagTier) return false;
+    if (filterTier !== "All" && t.tier !== filterTier) return false;
+    if (t.signalScore < filterScore) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!t.ticker.toLowerCase().includes(q) &&
@@ -307,14 +436,14 @@ export default function CapitolWatch() {
     return true;
   });
 
-  interface TickerEntry { ticker: string; asset: string; buys: number; sells: number; val: number; members: Set<string>; flagCount: number; }
+  interface TickerEntry { ticker: string; asset: string; buys: number; sells: number; val: number; members: Set<string>; signalCount: number; }
   const tickerMap: Record<string, TickerEntry> = {};
   trades.forEach(t => {
-    if (!tickerMap[t.ticker]) tickerMap[t.ticker] = { ticker:t.ticker, asset:t.asset, buys:0, sells:0, val:0, members:new Set(), flagCount:0 };
+    if (!tickerMap[t.ticker]) tickerMap[t.ticker] = { ticker:t.ticker, asset:t.asset, buys:0, sells:0, val:0, members:new Set(), signalCount:0 };
     tickerMap[t.ticker].val += amountMid(t.amount);
     tickerMap[t.ticker].members.add(t.representative);
     isBuy(t) ? tickerMap[t.ticker].buys++ : tickerMap[t.ticker].sells++;
-    if (t.flagTier) tickerMap[t.ticker].flagCount++;
+    if (t.tier !== "low") tickerMap[t.ticker].signalCount++;
   });
   const topTickers = Object.values(tickerMap).sort((a, b) => b.val - a.val).slice(0, 12);
 
@@ -326,10 +455,10 @@ export default function CapitolWatch() {
     memberMap[t.representative].val += amountMid(t.amount);
   });
   const topMembers = Object.values(memberMap).sort((a, b) => b.val - a.val).slice(0, 12);
-  const watchTrades = trades.filter(t => watchlist.includes(t.ticker) || watchMembers.includes(t.representative));
+  const watchTrades = sortedTrades.filter(t => watchlist.includes(t.ticker) || watchMembers.includes(t.representative));
 
-  const alertCount = trades.filter(t => t.flagTier === "alert").length;
-  const flagCount  = trades.filter(t => t.flagTier === "flag").length;
+  const diamondCount = trades.filter(t => t.tier === "diamond").length;
+  const highCount    = trades.filter(t => t.tier === "high").length;
 
   const toggleTicker = (t: string) => setWatchlist(w => w.includes(t) ? w.filter(x => x !== t) : [...w, t]);
   const toggleMember = (m: string) => setWatchMembers(w => w.includes(m) ? w.filter(x => x !== m) : [...w, m]);
@@ -399,13 +528,12 @@ export default function CapitolWatch() {
       {/* STATS BAR */}
       <div className="bg-white border-b border-border shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="grid grid-cols-2 md:grid-cols-5 divide-x divide-y md:divide-y-0 divide-border">
+          <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-border">
             {[
-              { label: "Trades Tracked",  value: trades.length,  sub: "all disclosures",                         color: "",                icon: Activity    },
-              { label: "Total Purchases", value: trades.filter(isBuy).length, sub: `${trades.length ? Math.round(trades.filter(isBuy).length/trades.length*100) : 0}% of volume`, color: "text-green-700", icon: TrendingUp   },
-              { label: "🔴 High Alerts",  value: alertCount,     sub: "genuinely suspicious",                    color: "text-red-600",    icon: AlertCircle },
-              { label: "🟡 Flagged",      value: flagCount,      sub: "worth watching",                          color: "text-amber-600",  icon: Flag        },
-              { label: "Watchlist Items", value: watchlist.length + watchMembers.length, sub: `${newAlerts.length} recent alerts`, color: newAlerts.length ? "text-amber-600" : "", icon: Star },
+              { label: "Trades Tracked",  value: trades.length,  sub: "all disclosures",       color: "",              icon: Activity    },
+              { label: "💎 Diamond",      value: diamondCount,   sub: "score 60+",             color: "text-blue-600", icon: Gem         },
+              { label: "📈 High Signal",  value: highCount,      sub: "score 40–59",           color: "text-green-600",icon: TrendingUp  },
+              { label: "Watchlist",       value: watchlist.length + watchMembers.length, sub: `${newAlerts.length} recent alerts`, color: newAlerts.length ? "text-amber-600" : "", icon: Star },
             ].map((s, i) => (
               <div key={i} className="px-3 md:px-4 py-2.5">
                 <div className="flex items-center justify-between mb-0.5">
@@ -452,6 +580,7 @@ export default function CapitolWatch() {
             <div className="lg:col-span-8">
               {/* FILTERS */}
               <div className="bg-white p-3 rounded-2xl border border-card-border shadow-sm mb-2 flex flex-col gap-2">
+                {/* Row 1: Search + party/type/chamber toggles */}
                 <div className="flex flex-col md:flex-row gap-2 items-center justify-between">
                   <div className="relative w-full md:w-56">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -510,32 +639,55 @@ export default function CapitolWatch() {
                   </div>
                 </div>
 
-                {/* FLAG FILTER ROW */}
-                <div className="flex items-center gap-2 border-t border-gray-100 pt-1.5">
-                  <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mr-1">Filter:</span>
+                {/* Row 2: Tier filter + score threshold */}
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-1.5">
+                  <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">Tier:</span>
                   {[
-                    { key: "All",     label: "All trades" },
-                    { key: "alerts",  label: "🔴 Alerts only" },
-                    { key: "flagged", label: "🟡 Flagged & above" },
+                    { key: "All",     label: "All" },
+                    { key: "diamond", label: "💎 Diamond" },
+                    { key: "high",    label: "📈 High" },
+                    { key: "watch",   label: "👁 Watch" },
                   ].map(f => (
                     <button
                       key={f.key}
-                      onClick={() => setFilterFlag(f.key)}
+                      onClick={() => setFilterTier(f.key)}
                       className={cn(
                         "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border",
-                        filterFlag === f.key
-                          ? f.key === "alerts"
-                            ? "bg-red-100 text-red-800 border-red-200"
-                            : f.key === "flagged"
-                            ? "bg-amber-100 text-amber-800 border-amber-200"
-                            : "bg-primary/10 text-primary border-primary/20"
+                        filterTier === f.key
+                          ? f.key === "diamond" ? "bg-blue-100 text-blue-800 border-blue-200"
+                          : f.key === "high"    ? "bg-green-100 text-green-800 border-green-200"
+                          : f.key === "watch"   ? "bg-amber-100 text-amber-800 border-amber-200"
+                          : "bg-primary/10 text-primary border-primary/20"
                           : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
                       )}
                     >
                       {f.label}
                     </button>
                   ))}
+
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">Min score:</span>
+                    {[{ v: 0, label: "All" }, { v: 20, label: "20+" }, { v: 40, label: "40+" }, { v: 60, label: "60+" }].map(o => (
+                      <button
+                        key={o.v}
+                        onClick={() => setFilterScore(o.v)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border",
+                          filterScore === o.v
+                            ? "bg-primary/10 text-primary border-primary/20"
+                            : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                        )}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              </div>
+
+              {/* Trade count */}
+              <div className="text-[11px] text-gray-400 mb-1.5 px-1">
+                {filtered.length} trade{filtered.length !== 1 ? "s" : ""} shown
               </div>
 
               {/* TRADE FEED LIST */}
@@ -544,45 +696,29 @@ export default function CapitolWatch() {
                   <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                     <Search className="w-8 h-8 text-gray-300 mx-auto mb-3" />
                     <p className="text-gray-500 font-medium">No trades match your filters.</p>
-                    <button onClick={() => { setSearch(""); setFilterParty("All"); setFilterType("All"); setFilterChamber("All"); setFilterFlag("All"); }} className="mt-2 text-sm text-primary hover:underline">Clear filters</button>
+                    <button onClick={() => { setSearch(""); setFilterParty("All"); setFilterType("All"); setFilterChamber("All"); setFilterTier("All"); setFilterScore(0); }} className="mt-2 text-sm text-primary hover:underline">Clear filters</button>
                   </div>
                 )}
                 
                 {filtered.map((trade, i) => {
-                  const tier = trade.flagTier ?? null;
-                  const reasons = trade.flagReasons ?? [];
+                  const tierCfg = TIER_CONFIG[trade.tier] || TIER_CONFIG["low"];
                   const isExp = expandedTrade === i;
                   const sig = signals[trade.ticker];
                   const sigStyle = sig ? (SIGNAL_STYLE[sig.signal] || SIGNAL_STYLE["Hold"]) : null;
+                  const tradeSignals = trade.signals || [];
+                  const tradeNoise   = trade.noise   || [];
 
                   return (
                     <div key={i}>
                       <div 
                         className={cn(
-                          "border rounded-xl py-2.5 px-3.5 transition-all duration-200 animate-fade-in hover:shadow-md cursor-pointer",
-                          tier === "alert"
-                            ? "bg-red-50 border-red-300"
-                            : tier === "flag"
-                            ? "bg-yellow-50 border-yellow-300"
-                            : "bg-white border-card-border",
-                          isExp && "ring-2 ring-primary/20 border-primary"
+                          "border rounded-xl py-2.5 px-3.5 bg-white transition-all duration-200 animate-fade-in hover:shadow-md cursor-pointer",
+                          isExp ? "ring-2 ring-primary/20 border-primary" : "border-card-border"
                         )}
                         onClick={() => { setExpandedTrade(isExp ? null : i); if(!sig) generateSignal(trade); }}
                       >
-                        {/* TIER LABEL — first line inside card */}
-                        {tier && (
-                          <div className={cn(
-                            "flex items-center gap-1.5 mb-1.5 text-[11px] font-bold uppercase tracking-wider",
-                            tier === "alert" ? "text-red-700" : "text-amber-700"
-                          )}>
-                            {tier === "alert" ? "🔴 High Alert" : "🟡 Flagged"}
-                            {reasons[0] && (
-                              <span className="font-normal normal-case tracking-normal text-gray-500 truncate">— {reasons[0]}</span>
-                            )}
-                          </div>
-                        )}
-
                         <div className="flex gap-3 items-center">
+                          {/* Ticker chip — colored by buy/sell */}
                           <div className={cn(
                             "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs shrink-0",
                             isBuy(trade) ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-orange-50 text-orange-700 border border-orange-100"
@@ -590,6 +726,7 @@ export default function CapitolWatch() {
                             {trade.ticker.slice(0,5)}
                           </div>
                           
+                          {/* Center: member + asset */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-semibold text-[13px] text-gray-900">{trade.representative}</span>
@@ -603,15 +740,36 @@ export default function CapitolWatch() {
                             <div className="text-[12px] text-gray-600 truncate">{trade.asset} <span className="text-gray-400">({trade.ticker})</span></div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-[11px] text-gray-400">{daysAgo(trade.date)}d ago</span>
-                            <span className="text-[11px] font-medium text-gray-600">{fmtMoney(amountMid(trade.amount))}</span>
-                            <span className={cn(
-                              "px-2 py-0.5 rounded-md text-[11px] font-semibold",
-                              isBuy(trade) ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"
-                            )}>
-                              {isBuy(trade) ? "Buy" : "Sell"}
-                            </span>
+                          {/* Right: score bar + score + tier + meta */}
+                          <div className="flex flex-col items-end gap-1 shrink-0 min-w-[120px]">
+                            {/* Score bar */}
+                            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-500"
+                                style={{
+                                  width: `${trade.signalScore}%`,
+                                  backgroundColor: tierCfg.color,
+                                }}
+                              />
+                            </div>
+                            {/* Score number + tier pill + meta */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-gray-400">{daysAgo(trade.date)}d ago</span>
+                              <span className="text-[11px] font-medium text-gray-600">{fmtMoney(amountMid(trade.amount))}</span>
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-md text-[11px] font-semibold",
+                                isBuy(trade) ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"
+                              )}>
+                                {isBuy(trade) ? "Buy" : "Sell"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[13px] font-bold" style={{ color: tierCfg.color }}>{trade.signalScore}</span>
+                              <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border", tierCfg.bg, tierCfg.textClass, tierCfg.border)}>
+                                {tierCfg.label}
+                              </span>
+                              <ChevronDown className={cn("w-3 h-3 text-gray-400 transition-transform", isExp && "rotate-180")} />
+                            </div>
                           </div>
                         </div>
 
@@ -620,35 +778,37 @@ export default function CapitolWatch() {
                           <div className="mt-3 pt-3 border-t border-gray-100 animate-fade-in">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               
-                              {/* Left Column: Flag Reasons & AI */}
+                              {/* Left Column: Score breakdown + AI */}
                               <div className="space-y-4">
-                                {reasons.length > 0 && (
-                                  <div className={cn(
-                                    "rounded-xl p-3 border",
-                                    tier === "alert"
-                                      ? "bg-red-50 border-red-200"
-                                      : "bg-amber-50 border-amber-200"
-                                  )}>
-                                    <div className={cn(
-                                      "text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-1",
-                                      tier === "alert" ? "text-red-800" : "text-amber-800"
-                                    )}>
-                                      <AlertCircle className="w-3.5 h-3.5" />
-                                      {tier === "alert" ? "Why this is a high alert" : "Why this is flagged"}
-                                    </div>
-                                    <ul className="space-y-1">
-                                      {reasons.map((f, fi) => (
-                                        <li key={fi} className={cn(
-                                          "text-sm flex items-start gap-2",
-                                          tier === "alert" ? "text-red-700" : "text-amber-700"
-                                        )}>
-                                          <span className={cn("mt-1", tier === "alert" ? "text-red-400" : "text-amber-400")}>•</span> {f}
-                                        </li>
-                                      ))}
-                                    </ul>
+                                {/* Score breakdown */}
+                                <div className="rounded-xl p-3 border border-gray-200 bg-gray-50">
+                                  <div className="text-xs font-bold uppercase tracking-wider mb-2 text-gray-600">Score Breakdown</div>
+                                  <div className="space-y-1">
+                                    {tradeSignals.map((s, si) => (
+                                      <div key={si} className="flex items-center justify-between text-[12px]">
+                                        <span className="text-gray-700">{s.label}</span>
+                                        <span className="font-bold text-green-600 ml-2 shrink-0">+{s.pts}</span>
+                                      </div>
+                                    ))}
+                                    {tradeNoise.map((n, ni) => (
+                                      <div key={ni} className="flex items-center justify-between text-[12px]">
+                                        <span className="text-gray-500">{n.label}</span>
+                                        <span className="font-bold text-gray-400 ml-2 shrink-0">{n.pts}</span>
+                                      </div>
+                                    ))}
+                                    {(tradeSignals.length > 0 || tradeNoise.length > 0) && (
+                                      <div className="flex items-center justify-between text-[12px] border-t border-gray-200 pt-1 mt-1">
+                                        <span className="font-bold text-gray-700">Total score</span>
+                                        <span className="font-bold" style={{ color: tierCfg.color }}>{trade.signalScore} / 100</span>
+                                      </div>
+                                    )}
+                                    {tradeSignals.length === 0 && tradeNoise.length === 0 && (
+                                      <p className="text-[12px] text-gray-400 italic">No signals triggered for this trade.</p>
+                                    )}
                                   </div>
-                                )}
+                                </div>
                                 
+                                {/* AI Analysis */}
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                                   <div className="flex items-center gap-2 mb-3">
                                     <div className="w-5 h-5 rounded bg-indigo-100 flex items-center justify-center">
@@ -766,7 +926,7 @@ export default function CapitolWatch() {
                     <p className="text-sm leading-relaxed text-blue-50">{weekSummary}</p>
                   ) : (
                     <p className="text-sm text-blue-200/70 text-center py-4">
-                      Generate an AI summary of congressional trading patterns based on the latest 150 disclosures.
+                      Generate an AI summary of congressional trading patterns based on the latest disclosures.
                     </p>
                   )}
                 </div>
@@ -847,9 +1007,9 @@ export default function CapitolWatch() {
                         <div className="text-xs font-medium text-gray-500 truncate max-w-[150px]">{t.asset}</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {t.flagCount > 0 && (
-                          <div className="bg-red-50 text-red-700 px-2 py-1 rounded-md text-[10px] font-bold border border-red-100 flex items-center gap-1">
-                            <Flag className="w-3 h-3" /> {t.flagCount}
+                        {t.signalCount > 0 && (
+                          <div className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-100 flex items-center gap-1">
+                            <Gem className="w-3 h-3" /> {t.signalCount}
                           </div>
                         )}
                         <button 
@@ -993,71 +1153,42 @@ export default function CapitolWatch() {
                 <p className="text-gray-500 max-w-sm mx-auto">Star any ticker or member in the other tabs to track their activity here and get alerts on new trades.</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-1">
                 {watchTrades.map((trade, i) => {
-                  const tier = trade.flagTier ?? null;
-                  const reasons = trade.flagReasons ?? [];
+                  const tierCfg = TIER_CONFIG[trade.tier] || TIER_CONFIG["low"];
                   return (
-                    <div key={i}>
-                      {tier && (
+                    <div key={i} className="border rounded-xl py-2.5 px-3.5 bg-white border-card-border hover:shadow-md transition-all">
+                      <div className="flex gap-3 items-center">
                         <div className={cn(
-                          "flex items-center gap-2 px-1 mb-1",
-                          tier === "alert" ? "text-red-700" : "text-amber-700"
+                          "w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs shrink-0",
+                          isBuy(trade) ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-orange-50 text-orange-700 border border-orange-100"
                         )}>
-                          <span className="text-xs font-bold uppercase tracking-wider">
-                            {tier === "alert" ? "🔴 High Alert" : "🟡 Flagged"}
-                          </span>
-                          {reasons[0] && (
-                            <span className="text-xs text-gray-500 truncate">— {reasons[0]}</span>
+                          {trade.ticker.slice(0,5)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-[13px] text-gray-900">{trade.representative}</span>
+                            <span className={cn("px-1.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase", pc(trade.party))}>
+                              {trade.party}
+                            </span>
+                          </div>
+                          <div className="text-[12px] text-gray-600 truncate">{trade.asset} <span className="text-gray-400">({trade.ticker})</span></div>
+                          {(trade.signals || []).length > 0 && (
+                            <div className="text-[11px] text-gray-500 truncate">{(trade.signals || [])[0].label}</div>
                           )}
                         </div>
-                      )}
-                      <div className={cn(
-                        "border rounded-2xl p-4 hover:shadow-md transition-all",
-                        tier === "alert"
-                          ? "bg-red-50 border-red-300"
-                          : tier === "flag"
-                          ? "bg-yellow-50 border-yellow-300"
-                          : "bg-white border-card-border"
-                      )}>
-                        <div className="flex gap-4 items-start">
-                          <div className={cn(
-                            "w-12 h-12 rounded-xl flex items-center justify-center font-bold text-sm shrink-0",
-                            isBuy(trade) ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-orange-50 text-orange-700 border border-orange-100"
-                          )}>
-                            {trade.ticker.slice(0,5)}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[13px] font-bold" style={{ color: tierCfg.color }}>{trade.signalScore}</span>
+                            <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border", tierCfg.bg, tierCfg.textClass, tierCfg.border)}>
+                              {tierCfg.label}
+                            </span>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              <span className="font-semibold text-gray-900">{trade.representative}</span>
-                              <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase", pc(trade.party))}>
-                                {trade.party}
-                              </span>
-                              {tier === "alert" && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-red-100 text-red-700 flex items-center gap-1">
-                                  <AlertCircle className="w-3 h-3" /> High Alert
-                                </span>
-                              )}
-                              {tier === "flag" && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-700 flex items-center gap-1">
-                                  <Flag className="w-3 h-3" /> Flagged
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-600">{trade.asset} <span className="text-gray-400">({trade.ticker})</span></div>
-                            {reasons.length > 0 && (
-                              <div className="mt-1 text-xs text-gray-500">{reasons[0]}</div>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-end gap-1 shrink-0">
-                            <span className={cn(
-                              "px-2.5 py-1 rounded-lg text-xs font-semibold",
-                              isBuy(trade) ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"
-                            )}>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[11px] text-gray-400">{daysAgo(trade.date)}d ago</span>
+                            <span className={cn("px-2 py-0.5 rounded-md text-[11px] font-semibold", isBuy(trade) ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700")}>
                               {isBuy(trade) ? "Buy" : "Sell"}
                             </span>
-                            <span className="text-sm font-medium text-gray-700">{trade.amount}</span>
-                            <span className="text-xs text-gray-400">{daysAgo(trade.date)}d ago</span>
                           </div>
                         </div>
                       </div>
