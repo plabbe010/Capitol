@@ -84,6 +84,7 @@ router.get("/trades", async (_req, res) => {
   try {
     const raw = await fetchAll();
     const all = raw
+      .filter((t) => !t.TickerType || t.TickerType === "ST")
       .map(normalizeRecord)
       .filter((t) => t.ticker && t.ticker !== "—" && t.date)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
