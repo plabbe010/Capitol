@@ -144,37 +144,32 @@ function computeFlags(trade: Trade, allTrades: Trade[]): { flagTier: "alert" | "
 
   // ── ALERT CONDITIONS ────────────────────────────────────────────────────────
 
-  // 1. First-time purchase of this ticker by this member
-  if (isThisBuy) {
-    const prevPurchase = allTrades.find(
-      t =>
-        t.representative === trade.representative &&
-        t.ticker === trade.ticker &&
-        isBuy(t.type) &&
-        t.date < trade.date
-    );
-    if (!prevPurchase) {
-      alertReasons.push(`First purchase of ${trade.ticker} by this member on record`);
-    }
-  }
-
-  // 2. Bipartisan buy — opposite party also bought same ticker within 30 days
+  // 1. Bipartisan buy — 2+ distinct opposite-party members bought same ticker within 14 days
+  // (Requires 2+ members to avoid false positives from common large-cap stocks)
   if (isThisBuy && (trade.party === "D" || trade.party === "R")) {
     const oppositeParty = trade.party === "D" ? "R" : "D";
-    const bipartisan = allTrades.some(
-      t =>
-        t.ticker === trade.ticker &&
-        t.party === oppositeParty &&
-        isBuy(t.type) &&
-        t.representative !== trade.representative &&
-        daysBetween(trade.date, t.date) <= 30
-    );
-    if (bipartisan) {
-      alertReasons.push(`Bipartisan signal — both D & R buying within 30 days`);
+    const oppositeMembers = [
+      ...new Set(
+        allTrades
+          .filter(
+            t =>
+              t.ticker === trade.ticker &&
+              t.party === oppositeParty &&
+              isBuy(t.type) &&
+              t.representative !== trade.representative &&
+              daysBetween(trade.date, t.date) <= 14
+          )
+          .map(t => t.representative)
+      ),
+    ];
+    if (oppositeMembers.length >= 2) {
+      alertReasons.push(
+        `Bipartisan signal — 2+ members from both parties buying within 14 days`
+      );
     }
   }
 
-  // 3. Committee/sector overlap
+  // 2. Committee/sector overlap
   const sector = TICKER_SECTOR[trade.ticker];
   if (sector) {
     const memberCommittees = MEMBER_COMMITTEES[trade.representative] || [];
@@ -187,7 +182,7 @@ function computeFlags(trade: Trade, allTrades: Trade[]): { flagTier: "alert" | "
     }
   }
 
-  // 4. Filed at or near the 45-day legal limit
+  // 3. Filed at or near the 45-day legal limit
   if (gap >= 40 && trade.date && trade.filed) {
     alertReasons.push(`Filed ${gap} days after trade — pushed to the legal limit (45d max)`);
   }
