@@ -19,8 +19,10 @@ import {
   Activity,
   AlertCircle,
   X,
-  Gem,
+  Flame,
+  CircleDot,
   ChevronDown,
+  Minus,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -59,11 +61,11 @@ const STORAGE_KEY = "capitolwatch_v3";
 const SEEN_KEY    = "capitolwatch_seen";
 
 // Tier display config
-const TIER_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; textClass: string }> = {
-  diamond: { label: "💎 Diamond", color: "#378ADD", bg: "bg-blue-50",   border: "border-blue-200",  textClass: "text-blue-700"  },
-  high:    { label: "📈 High",    color: "#639922", bg: "bg-green-50",  border: "border-green-200", textClass: "text-green-700" },
-  watch:   { label: "👁 Watch",   color: "#BA7517", bg: "bg-amber-50",  border: "border-amber-200", textClass: "text-amber-700" },
-  low:     { label: "— Low",      color: "#888780", bg: "bg-gray-50",   border: "border-gray-200",  textClass: "text-gray-500"  },
+const TIER_CONFIG: Record<string, { label: string; Icon: React.ElementType; color: string; bg: string; border: string; textClass: string }> = {
+  diamond: { label: "Priority",  Icon: Flame,     color: "#A32D2D", bg: "bg-red-50",   border: "border-red-200",   textClass: "text-red-700"   },
+  high:    { label: "Elevated",  Icon: TrendingUp, color: "#854F0B", bg: "bg-amber-50", border: "border-amber-200", textClass: "text-amber-800" },
+  watch:   { label: "Routine",   Icon: CircleDot,  color: "#3B6D11", bg: "bg-green-50", border: "border-green-200", textClass: "text-green-700" },
+  low:     { label: "Noise",     Icon: Minus,      color: "#888780", bg: "bg-gray-50",  border: "border-gray-200",  textClass: "text-gray-500"  },
 };
 
 const SIGNAL_STYLE = {
@@ -453,7 +455,7 @@ export default function CapitolWatch() {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background text-foreground pb-20">
-      
+
       {/* HEADER */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -462,7 +464,7 @@ export default function CapitolWatch() {
               <Shield className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl md:text-2xl font-serif mt-1 tracking-wide">Capitol Watch</span>
-            
+
             {usingDemo ? (
               <span className="ml-2 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200">
                 demo data
@@ -482,7 +484,7 @@ export default function CapitolWatch() {
                 <AlertCircle className="w-4 h-4" /> Error loading
               </span>
             )}
-            
+
             <button 
               onClick={() => handleRefresh(true)}
               className="px-4 py-2 rounded-lg bg-white border border-border text-sm font-medium hover:bg-gray-50 hover:text-primary transition-all flex items-center gap-2"
@@ -518,9 +520,9 @@ export default function CapitolWatch() {
           <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-border">
             {[
               { label: "Trades Tracked",  value: trades.length,  sub: "all disclosures",       color: "",              icon: Activity    },
-              { label: "💎 Diamond",      value: diamondCount,   sub: "score 60+",             color: "text-blue-600", icon: Gem         },
-              { label: "📈 High Signal",  value: highCount,      sub: "score 40–59",           color: "text-green-600",icon: TrendingUp  },
-              { label: "Watchlist",       value: watchlist.length + watchMembers.length, sub: `${newAlerts.length} recent alerts`, color: newAlerts.length ? "text-amber-600" : "", icon: Star },
+              { label: "Priority",         value: diamondCount,   sub: "score 60+",             color: "text-red-600",  icon: Flame       },
+              { label: "Elevated",         value: highCount,      sub: "score 40–59",           color: "text-amber-700",icon: TrendingUp  },
+              { label: "Watchlist",        value: watchlist.length + watchMembers.length, sub: `${newAlerts.length} recent alerts`, color: newAlerts.length ? "text-amber-600" : "", icon: Star },
             ].map((s, i) => (
               <div key={i} className="px-3 md:px-4 py-2.5">
                 <div className="flex items-center justify-between mb-0.5">
@@ -536,7 +538,7 @@ export default function CapitolWatch() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-4">
-        
+
         {/* TABS */}
         <div className="flex overflow-x-auto scrollbar-custom border-b border-border mb-4 gap-6">
           {[
@@ -563,7 +565,7 @@ export default function CapitolWatch() {
         {/* ══ FEED ══════════════════════════════════════════════════════════ */}
         {tab === "feed" && (
           <div className="animate-fade-in grid grid-cols-1 lg:grid-cols-12 gap-8">
-            
+
             <div className="lg:col-span-8">
               {/* FILTERS */}
               <div className="bg-white p-3 rounded-2xl border border-card-border shadow-sm mb-2 flex flex-col gap-2">
@@ -579,7 +581,7 @@ export default function CapitolWatch() {
                       onChange={e => setSearch(e.target.value)}
                     />
                   </div>
-                  
+
                   <div className="flex flex-wrap gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 scrollbar-custom">
                     <div className="flex bg-gray-100 p-1 rounded-lg">
                       {["All", "D", "R"].map(p => (
@@ -631,9 +633,9 @@ export default function CapitolWatch() {
                   <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">Tier:</span>
                   {[
                     { key: "All",     label: "All" },
-                    { key: "diamond", label: "💎 Diamond" },
-                    { key: "high",    label: "📈 High" },
-                    { key: "watch",   label: "👁 Watch" },
+                    { key: "diamond", label: "Priority" },
+                    { key: "high",    label: "Elevated" },
+                    { key: "watch",   label: "Routine" },
                   ].map(f => (
                     <button
                       key={f.key}
@@ -686,7 +688,7 @@ export default function CapitolWatch() {
                     <button onClick={() => { setSearch(""); setFilterParty("All"); setFilterType("All"); setFilterChamber("All"); setFilterTier("All"); setFilterScore(0); }} className="mt-2 text-sm text-primary hover:underline">Clear filters</button>
                   </div>
                 )}
-                
+
                 {filtered.map((trade, i) => {
                   const tierCfg = TIER_CONFIG[trade.tier] || TIER_CONFIG["low"];
                   const isExp = expandedTrade === i;
@@ -712,7 +714,7 @@ export default function CapitolWatch() {
                           )}>
                             {trade.ticker.slice(0,5)}
                           </div>
-                          
+
                           {/* Center: member + asset */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -752,7 +754,8 @@ export default function CapitolWatch() {
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="text-[13px] font-bold" style={{ color: tierCfg.color }}>{trade.signalScore}</span>
-                              <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border", tierCfg.bg, tierCfg.textClass, tierCfg.border)}>
+                              <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1", tierCfg.bg, tierCfg.textClass, tierCfg.border)}>
+                                <tierCfg.Icon className="w-2.5 h-2.5" />
                                 {tierCfg.label}
                               </span>
                               <ChevronDown className={cn("w-3 h-3 text-gray-400 transition-transform", isExp && "rotate-180")} />
@@ -764,7 +767,7 @@ export default function CapitolWatch() {
                         {isExp && (
                           <div className="mt-3 pt-3 border-t border-gray-100 animate-fade-in">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              
+
                               {/* Left Column: Score breakdown + AI */}
                               <div className="space-y-4">
                                 {/* Score breakdown */}
@@ -794,7 +797,7 @@ export default function CapitolWatch() {
                                     )}
                                   </div>
                                 </div>
-                                
+
                                 {/* AI Analysis */}
                                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                                   <div className="flex items-center gap-2 mb-3">
@@ -803,13 +806,13 @@ export default function CapitolWatch() {
                                     </div>
                                     <span className="text-xs font-bold text-indigo-900 uppercase tracking-wider">AI Analysis</span>
                                   </div>
-                                  
+
                                   {signalLoading[trade.ticker] && (
                                     <div className="flex items-center gap-2 text-sm text-indigo-600">
                                       <RefreshCw className="w-4 h-4 animate-spin" /> Analyzing position...
                                     </div>
                                   )}
-                                  
+
                                   {sig && sigStyle && (
                                     <div>
                                       <div className="flex items-center gap-3 mb-2">
@@ -866,7 +869,7 @@ export default function CapitolWatch() {
                                     <Star className={cn("w-4 h-4", watchMembers.includes(trade.representative) && "fill-amber-500 text-amber-500")} />
                                     {watchMembers.includes(trade.representative) ? "Member Watched" : "Watch Member"}
                                   </button>
-                                  
+
                                   <button 
                                     onClick={(e) => { e.stopPropagation(); toggleTicker(trade.ticker); }}
                                     className={cn(
@@ -891,7 +894,7 @@ export default function CapitolWatch() {
                 })}
               </div>
             </div>
-            
+
             {/* RIGHT SIDEBAR */}
             <div className="lg:col-span-4 space-y-6">
               {/* AI WEEKLY SUMMARY */}
@@ -902,7 +905,7 @@ export default function CapitolWatch() {
                   </div>
                   <h3 className="font-serif text-lg tracking-wide">AI Market Pulse</h3>
                 </div>
-                
+
                 <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm border border-white/10 mb-3 min-h-[90px]">
                   {summaryLoading ? (
                     <div className="flex flex-col items-center justify-center h-full text-blue-200 gap-3 py-4">
@@ -932,13 +935,13 @@ export default function CapitolWatch() {
                   {summaryLoading ? "Thinking..." : weekSummary ? "Regenerate Analysis" : "Generate Summary"}
                 </button>
               </div>
-              
+
               {/* QUICK WATCHLIST WIDGET */}
               <div className="bg-white rounded-2xl p-5 border border-card-border shadow-sm">
                 <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <Star className="w-4 h-4 text-amber-500 fill-amber-500" /> Quick Watchlist
                 </h3>
-                
+
                 <div className="space-y-4">
                   <div>
                     <div className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-2">Tickers ({watchlist.length})</div>
@@ -979,7 +982,7 @@ export default function CapitolWatch() {
                 <p className="text-sm text-gray-500 mt-1">Ranked by estimated disclosed value. Click cards for AI signals.</p>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {topTickers.map(t => {
                 const sig = signals[t.ticker];
@@ -987,7 +990,7 @@ export default function CapitolWatch() {
                 const total = t.buys + t.sells;
                 const buyPct = total > 0 ? Math.round((t.buys / total) * 100) : 0;
                 const sample = trades.find(tr => tr.ticker === t.ticker);
-                
+
                 return (
                   <div 
                     key={t.ticker} 
@@ -1016,7 +1019,7 @@ export default function CapitolWatch() {
                         </button>
                       </div>
                     </div>
-                    
+
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                         <div className="text-[10px] uppercase font-bold text-gray-400 mb-1">Est. Volume</div>
@@ -1033,7 +1036,7 @@ export default function CapitolWatch() {
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="space-y-1.5 mb-2">
                       <div className="h-2 w-full bg-orange-100 rounded-full overflow-hidden flex">
                         <div className="h-full bg-green-500 rounded-r-full transition-all duration-500" style={{ width: `${buyPct}%` }} />
@@ -1080,11 +1083,11 @@ export default function CapitolWatch() {
               <h2 className="text-2xl font-serif text-gray-900">Top Trading Members</h2>
               <p className="text-sm text-gray-500 mt-1">Ranked by total estimated disclosed value in the recent period.</p>
             </div>
-            
+
             <div className="bg-white rounded-2xl border border-card-border overflow-hidden shadow-sm">
               {topMembers.map((m, i) => (
                 <div key={m.name} className="p-4 md:p-6 border-b border-gray-100 last:border-0 flex flex-col md:flex-row md:items-center gap-4 hover:bg-gray-50 transition-colors">
-                  
+
                   <div className="flex items-center gap-4 md:w-1/3">
                     <div className="w-8 text-center font-serif text-2xl text-gray-300">
                       {i + 1}
@@ -1100,7 +1103,7 @@ export default function CapitolWatch() {
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="flex-1 px-12 md:px-0">
                     <div className="flex justify-between text-xs mb-1.5">
                       <span className="font-medium text-gray-600">{m.trades} trades</span>
@@ -1139,7 +1142,7 @@ export default function CapitolWatch() {
               <h2 className="text-2xl font-serif text-gray-900">Your Watchlist</h2>
               <p className="text-sm text-gray-500 mt-1">Star any ticker or member in the other tabs to track their activity here and get alerts on new trades.</p>
             </div>
-            
+
             {watchTrades.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                 <Star className="w-10 h-10 text-gray-200 mx-auto mb-4" />
@@ -1173,7 +1176,8 @@ export default function CapitolWatch() {
                         <div className="flex flex-col items-end gap-1 shrink-0">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[13px] font-bold" style={{ color: tierCfg.color }}>{trade.signalScore}</span>
-                            <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border", tierCfg.bg, tierCfg.textClass, tierCfg.border)}>
+                            <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center gap-1", tierCfg.bg, tierCfg.textClass, tierCfg.border)}>
+                              <tierCfg.Icon className="w-2.5 h-2.5" />
                               {tierCfg.label}
                             </span>
                           </div>

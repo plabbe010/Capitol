@@ -23,22 +23,41 @@ const AMOUNT_MID: Record<string, number> = {
 
 // ── Known large-cap tickers (trigger −40 household-name discount) ─────────────
 const LARGE_CAPS = new Set([
+  // US Mega-cap tech
   "AAPL","MSFT","GOOGL","GOOG","AMZN","META","TSLA","NVDA","BRK.A","BRK.B",
-  "JPM","JNJ","V","UNH","XOM","PG","MA","HD","CVX","MRK","ABBV","LLY","PFE",
-  "KO","PEP","BAC","TMO","AVGO","COST","DIS","ABT","WMT","MCD","CSCO","ACN",
-  "DHR","NEE","TXN","BMY","AMGN","RTX","HON","UPS","PM","T","VZ","INTC",
-  "QCOM","IBM","GE","CAT","BA","GS","MS","C","WFC","AMD","ORCL","CRM","NFLX",
+  "ORCL","CRM","NFLX","ADBE","AMD","INTC","QCOM","TXN","AVGO","IBM",
+  // Semiconductors (well-known names, not obscure supply chain)
+  "TSM","ASML","MU","AMAT","KLAC","LRCX","SNPS","CDNS",
+  // Finance
+  "JPM","GS","MS","BAC","WFC","C","BLK","SCHW","AXP","V","MA","PYPL",
+  // Healthcare / Pharma
+  "JNJ","PFE","MRK","ABBV","LLY","BMY","AMGN","GILD","UNH","CVS","HCA",
+  // Energy majors
+  "XOM","CVX","COP","SLB","OXY","MPC","PSX","VLO",
+  "KMI","WMB","ET","EPD","OKE",   // pipeline / midstream — well-known, heavily traded
+  // Defense primes (large, well-covered)
+  "LMT","RTX","NOC","BA","GD","LHX","HII",
+  // Consumer / Retail
+  "WMT","HD","COST","MCD","KO","PEP","PG","DIS","NKE","SBUX",
+  "TGT","LOW","TJX","PM","MO","MDLZ",
+  // Telecoms
+  "T","VZ","TMUS",
+  // Other mega / well-known
+  "ABT","TMO","DHR","NEE","DUK","SO","AMT","PLD","SPG",
+  "ACN","CAT","HON","UPS","FDX","GE","MMM","DE",
 ]);
 
 const TICKER_SECTOR: Record<string, string> = {
   LMT: "defense", RTX: "defense", NOC: "defense", BA: "defense", GD: "defense", LHX: "defense", HII: "defense",
   XOM: "energy",  CVX: "energy",  COP: "energy",  OXY: "energy",  SLB: "energy",  MPC: "energy",  PSX: "energy",
+  KMI: "energy",  WMB: "energy",  ET:  "energy",  EPD: "energy",  OKE: "energy",  VLO: "energy",
   NVDA: "tech",   MSFT: "tech",   GOOGL: "tech",  GOOG: "tech",   AAPL: "tech",   AMZN: "tech",
   META: "tech",   ORCL: "tech",   IBM: "tech",    INTC: "tech",   AMD: "tech",    QCOM: "tech",
+  TSM:  "tech",   ASML: "tech",   MU:  "tech",    AMAT: "tech",   KLAC: "tech",   LRCX: "tech",
   PFE: "health",  JNJ: "health",  MRK: "health",  ABBV: "health", LLY: "health",  BMY: "health",
-  AMGN: "health", UNH: "health",  CVS: "health",  HCA: "health",
+  AMGN: "health", UNH: "health",  CVS: "health",  HCA: "health",  GILD: "health",
   JPM: "finance", GS: "finance",  MS: "finance",  BAC: "finance", WFC: "finance", C: "finance",
-  BLK: "finance", SCHW: "finance",
+  BLK: "finance", SCHW: "finance", V: "finance",  MA: "finance",  AXP: "finance",
 };
 
 const SECTOR_COMMITTEE: Record<string, string[]> = {
@@ -205,7 +224,8 @@ async function fetchPriceData(tickers: string[]): Promise<Record<string, PriceDa
 function computeScore(
   trade: Omit<Trade, "signalScore" | "tier" | "signals" | "noise">,
   allTrades: Omit<Trade, "signalScore" | "tier" | "signals" | "noise">[],
-  priceData: Record<string, PriceData>
+  priceData: Record<string, PriceData>,
+  committeeMap: Record<string, string[]> = {}
 ): { signalScore: number; tier: "diamond" | "high" | "watch" | "low"; signals: ScoreSignal[]; noise: ScoreSignal[] } {
   const signals: ScoreSignal[] = [];
   const noise: ScoreSignal[]   = [];
@@ -225,7 +245,8 @@ function computeScore(
   // 2. Committee/sector overlap (+20)
   const sector = TICKER_SECTOR[trade.ticker];
   if (sector) {
-    const memberCommittees  = MEMBER_COMMITTEES[trade.representative] || [];
+    const nameKey = trade.representative.toLowerCase().trim();
+    const memberCommittees = committeeMap[nameKey] || MEMBER_COMMITTEES[trade.representative] || [];
     const sectorCommittees  = SECTOR_COMMITTEE[sector] || [];
     const overlap = memberCommittees.find(mc =>
       sectorCommittees.some(sc => mc.includes(sc) || sc.includes(mc))
@@ -319,7 +340,45 @@ function computeScore(
   return { signalScore, tier, signals, noise };
 }
 
-// ── Data fetching ─────────────────────────────────────────────────────────────
+const COMMITTEE_URL = "https://theunitedstates.io/congress-legislators/committee-membership-current.json";
+const committeeCache = new NodeCache({ stdTTL: 86400 }); // 24-hour cache — committee data is stable
+
+async function fetchCommitteeMap(): Promise<Record<string, string[]>> {
+  const cached = committeeCache.get<Record<string, string[]>>("committee_map");
+  if (cached) return cached;
+
+  try {
+    const res = await axios.get<Record<string, { name: string; members: Array<{ name: string }> }>>(
+      COMMITTEE_URL, { headers: { Accept: "application/json" }, timeout: 10000 }
+    );
+    const map: Record<string, string[]> = {};
+    for (const cmte of Object.values(res.data || {})) {
+      const cmteName = cmte.name || "";
+      for (const member of (cmte.members || [])) {
+        const key = (member.name || "").toLowerCase().trim();
+        if (!key) continue;
+        if (!map[key]) map[key] = [];
+        map[key].push(cmteName);
+      }
+    }
+    // Merge with hardcoded fallback (hardcoded takes precedence for known members)
+    for (const [name, cmtes] of Object.entries(MEMBER_COMMITTEES)) {
+      const key = name.toLowerCase();
+      map[key] = [...new Set([...cmtes, ...(map[key] || [])])];
+    }
+    committeeCache.set("committee_map", map);
+    console.log(`[committees] loaded ${Object.keys(map).length} members`);
+    return map;
+  } catch {
+    console.warn("[committees] fetch failed, using static fallback");
+    // Fall back to static map
+    const fallback: Record<string, string[]> = {};
+    for (const [name, cmtes] of Object.entries(MEMBER_COMMITTEES)) {
+      fallback[name.toLowerCase()] = cmtes;
+    }
+    return fallback;
+  }
+}
 async function fetchAll(): Promise<RawQuiverTrade[]> {
   const cached = cache.get<RawQuiverTrade[]>(CACHE_KEY);
   if (cached) {
@@ -365,12 +424,15 @@ router.get("/trades", async (_req, res) => {
       .map(normalizeRecord)
       .filter((t) => t.ticker && t.ticker !== "—" && t.date);
 
-    // Fetch price data in parallel (non-blocking)
+    // Fetch price data and committee map in parallel (both non-blocking)
     const uniqueTickers = [...new Set(normalized.map(t => t.ticker))].slice(0, 50);
-    const priceData = await fetchPriceData(uniqueTickers).catch(() => ({}));
+    const [priceData, committeeMap] = await Promise.all([
+      fetchPriceData(uniqueTickers).catch(() => ({})),
+      fetchCommitteeMap().catch(() => ({})),
+    ]);
 
     const enriched: Trade[] = normalized.map((trade) => {
-      const { signalScore, tier, signals, noise } = computeScore(trade, normalized, priceData);
+      const { signalScore, tier, signals, noise } = computeScore(trade, normalized, priceData, committeeMap);
       return { ...trade, signalScore, tier, signals, noise };
     });
 
