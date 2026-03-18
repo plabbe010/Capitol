@@ -1,0 +1,143 @@
+## What we need you to update
+ 
+### In `server/index.js` — the flag engine
+ 
+Find the function called `computeFlags` (or wherever flag logic lives) and replace
+it with a two-tier system:
+ 
+---
+ 
+### 🔴 TIER 1: "alert" — genuinely suspicious, sorts to top of feed
+ 
+Flag as `alert` if ANY of these are true:
+ 
+1. **First time this member has purchased this ticker**
+   - Check the full trades dataset — if there is no earlier trade where
+     `representative === this member` AND `ticker === this ticker` AND it was
+     a purchase, flag it.
+ 
+2. **Bipartisan buy**
+   - If this is a purchase, check if any member from the *opposite* party also
+     purchased the same ticker within 30 days (before or after this trade date).
+   - Reason string: `"Bipartisan signal — both D & R buying within 30 days"`
+ 
+3. **Committee overlap with sector**
+   - We have a committee map (member name → array of committees they sit on).
+   - We also have a sector map (ticker → sector) and a sector→committees map.
+   - If the member sits on a committee that oversees the stock's sector, flag it.
+   - Reason string: `"On [committee name] — directly oversees this sector"`
+ 
+4. **Filed at or near the 45-day legal limit**
+   - Calculate gap = days between `transaction_date` and `disclosure_date`.
+   - If gap >= 40 days, flag as alert.
+   - Reason string: `"Filed [N] days after trade — pushed to the legal limit (45d max)"`
+ 
+---
+ 
+### 🟡 TIER 2: "flag" — worth watching, shown below alerts
+ 
+Flag as `flag` if ANY of these are true (and none of the alert conditions fired):
+ 
+1. **Large position**
+   - If estimated trade value >= $250,000: reason = `"Large position — ~$[X] disclosed"`
+   - If estimated trade value >= $50,000 AND it is more than 3× this member's
+     average trade size: reason = `"3× larger than this member's typical trade"`
+   - If estimated trade value >= $50,000 (baseline): reason = `"Notable size — ~$[X] disclosed"`
+ 
+2. **Slow disclosure**
+   - If gap between transaction and disclosure is 30–39 days.
+   - Reason string: `"Slow to disclose — [N] days between trade and filing"`
+ 
+3. **Obscure or small-cap ticker**
+   - If the ticker is NOT in the known large-cap list AND has no known sector mapping,
+     AND it is a purchase — flag it.
+   - Reason string: `"Obscure or small-cap ticker — not a typical congressional pick"`
+ 
+---
+ 
+### Output format per trade
+ 
+Each trade object sent to the client should include:
+ 
+```json
+{
+  "flagTier": "alert" | "flag" | null,
+  "flagReasons": ["Primary reason", "Secondary reason if any"]
+}
+```
+ 
+- `flagTier` is `"alert"` if any alert condition fired, `"flag"` if only flag
+  conditions fired, `null` if nothing fired.
+- `flagReasons` lists all reasons that fired, alert reasons first.
+- Trades should be sorted: alerts first, then flags, then normal — newest date
+  within each group.
+ 
+---
+ 
+### In the feed sort order
+ 
+After enriching trades with flag data, sort the array like this:
+```
+alert trades (newest first) → flag trades (newest first) → normal trades (newest first)
+```
+ 
+---
+ 
+### Amount midpoint helper
+ 
+Use this mapping to convert amount range strings to numeric midpoints:
+ 
+```js
+const AMOUNT_MID = {
+  "$1,001 - $15,000": 8000,
+  "$15,001 - $50,000": 32500,
+  "$50,001 - $100,000": 75000,
+  "$100,001 - $250,000": 175000,
+  "$250,001 - $500,000": 375000,
+  "$500,001 - $1,000,000": 750000,
+  "$1,000,001 - $5,000,000": 3000000,
+  "Over $5,000,000": 5000000,
+};
+```
+ 
+---
+ 
+### In `client/src/App.jsx` — UI updates
+ 
+1. **Remove any client-side flag logic** — the server now sends `flagTier` and
+   `flagReasons` on every trade object. The client should just read those fields.
+ 
+2. **Trade card styling** — apply different styles based on `flagTier`:
+   - `alert`: red-tinted background (`#fff1f2`), red border (`#fca5a5`)
+   - `flag`: yellow-tinted background (`#fffbeb`), yellow border (`#fcd34d`)
+   - `null`: default white card
+ 
+3. **Show tier label** — above each flagged trade card, show a small label:
+   - Alert: `"🔴 High Alert"` in red
+   - Flag: `"🟡 Flagged"` in amber
+   - Show the first (most important) reason inline next to the label
+ 
+4. **Expanded trade detail** — when a trade card is clicked open, show ALL
+   `flagReasons` as a bulleted list inside a colored box matching the tier.
+ 
+5. **Stats bar** — show separate counts:
+   - `🔴 High alerts` — count of trades where `flagTier === "alert"`
+   - `🟡 Flagged` — count of trades where `flagTier === "flag"`
+ 
+6. **Filter buttons** — add filter options to the trade feed:
+   - "All", "🔴 Alerts only", "🟡 Flagged & above"
+   - Filtering by "Alerts only" shows only `flagTier === "alert"` trades
+   - Filtering by "Flagged & above" shows trades where `flagTier` is not null
+ 
+7. **AI summary prompt** — when generating the weekly AI summary, pass the
+   high-alert trades first and instruct the AI to lead with the most suspicious ones.
+ 
+---
+ 
+## Do not change
+ 
+- The data fetching logic (URLs, normalizers, cache)
+- The watchlist / alert banner logic
+- The AI signal generation per ticker
+- The Tabs structure (Feed, Tickers, Members, Watchlist)
+- The overall visual design and color palette
