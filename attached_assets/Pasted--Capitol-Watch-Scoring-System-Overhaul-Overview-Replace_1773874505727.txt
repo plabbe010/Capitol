@@ -1,0 +1,221 @@
+# Capitol Watch — Scoring System Overhaul
+
+## Overview
+Replace the current binary alert/flag system with a numeric scoring system (0–100).
+Each trade gets a `signalScore`, a `tier` label, a `signals` array (what added points),
+and a `noise` array (what discounted points). The feed sorts by score descending.
+A threshold slider lets the user filter out low-score trades.
+
+---
+
+## Part 1 — Server (`server/index.js`)
+
+### Remove these signals entirely (they are unreliable with limited data history):
+- "First time this member has purchased this ticker" — our dataset doesn't go back
+  far enough to know if this is truly their first buy ever. Remove it completely.
+- "Unusually large for this member" — same problem, we don't know their baseline.
+
+### Replace `computeFlags` with a new function `computeScore(trade, allTrades, committeeMap, priceData)`
+
+It should return:
+```js
+{
+  signalScore: <integer 0–100>,
+  tier: "diamond" | "high" | "watch" | "low",
+  signals: [ { label: string, pts: number } ],  // positive factors
+  noise:   [ { label: string, pts: number } ],  // negative discounts (pts are negative)
+}
+```
+
+#### Scoring rules — ADDITIVE (signals, positive points):
+
+1. **Obscure / small-cap ticker** (+30)
+   - Ticker is NOT in the known large-cap list (see below)
+   - AND is a Purchase
+   - label: `"Obscure small-cap"`
+
+2. **Committee overlap with sector** (+20)
+   - Member sits on a committee that directly oversees this stock's sector
+   - label: `"On [committee name] — oversees [sector] sector"`
+
+3. **Bipartisan buy** (+15)
+   - Both a Democrat AND a Republican purchased the same ticker within 30 days
+   - label: `"Bipartisan buy — D & R both purchasing within 30 days"`
+
+4. **Near 52-week low** (+15)
+   - Current price is within 20% above the 52-week low
+   - Requires price data (see Part 2 below)
+   - label: `"Trading near 52-week low"`
+
+5. **Multiple members buying same obscure ticker** (+25)
+   - 2 or more members bought the same ticker that is NOT in the large-cap list
+   - label: `"[N] members buying this obscure ticker"`
+   - Only apply if the ticker is not a known large-cap
+
+6. **Filed quickly** (+10)
+   - Gap between transaction date and disclosure date is 5 days or fewer
+   - label: `"Filed within [N] days — unusually prompt"`
+
+7. **Filed near the 45-day legal limit** (+8 to signals, treated as suspicious)
+   - Gap is 40 days or more
+   - label: `"Filed [N]d after trade — near the 45-day limit"`
+
+#### Scoring rules — SUBTRACTIVE (noise, negative points):
+
+1. **Household name ticker** (−40)
+   - Ticker is in the known large-cap list below
+   - label: `"Household name ticker"`
+
+2. **High-volume congressional stock** (−15)
+   - Ticker appears 10 or more times in the full trades dataset
+   - label: `"Frequently traded by Congress"`
+
+3. **Known frequent trader** (−15)
+   - Member appears 20 or more times in the full trades dataset
+   - label: `"High-volume congressional trader"`
+
+4. **Sell transaction** (−10)
+   - trade.type includes "sale" or "sell"
+   - label: `"Sell transaction (less predictive)"`
+
+#### Tier thresholds:
+- Score >= 60 → `"diamond"`
+- Score >= 40 → `"high"`
+- Score >= 20 → `"watch"`
+- Score < 20  → `"low"`
+
+#### Known large-cap list (these all trigger the −40 household name discount):
+```js
+const LARGE_CAPS = new Set([
+  "AAPL","MSFT","GOOGL","GOOG","AMZN","META","TSLA","NVDA","BRK.A","BRK.B",
+  "JPM","JNJ","V","UNH","XOM","PG","MA","HD","CVX","MRK","ABBV","LLY","PFE",
+  "KO","PEP","BAC","TMO","AVGO","COST","DIS","ABT","WMT","MCD","CSCO","ACN",
+  "DHR","NEE","TXN","BMY","AMGN","RTX","HON","UPS","PM","T","VZ","INTC",
+  "QCOM","IBM","GE","CAT","BA","GS","MS","C","WFC","AMD","ORCL","CRM","NFLX",
+]);
+```
+
+### Update the `/api/trades` route:
+- After computing scores, add `signalScore`, `tier`, `signals`, `noise` to each trade
+- Sort by `signalScore` descending (highest score first)
+- Remove the old `flagTier` and `flagReasons` fields
+- Keep returning the most recent 200 trades (after scoring, sort by score not date)
+
+---
+
+## Part 2 — Stock price API (52-week low signal)
+
+Use the **Yahoo Finance unofficial API** — no key needed, completely free.
+
+Endpoint pattern:
+```
+https://query1.finance.yahoo.com/v8/finance/chart/{TICKER}?range=1y&interval=1d
+```
+
+Example fetch for ICHR:
+```
+https://query1.finance.yahoo.com/v8/finance/chart/ICHR?range=1y&interval=1d
+```
+
+The response includes `meta.fiftyTwoWeekLow`, `meta.fiftyTwoWeekHigh`, and
+`meta.regularMarketPrice` which is all we need.
+
+### Implementation:
+- Add a new async function `fetchPriceData(tickers)` that:
+  - Takes an array of unique tickers from the current trades
+  - Fetches price data for each in parallel (use Promise.allSettled)
+  - Returns a map: `{ TICKER: { low52: number, high52: number, currentPrice: number } }`
+  - Cache results for 60 minutes (price data doesn't need to be real-time)
+  - Gracefully skip any ticker that fails (non-fatal)
+  - Limit to the top 50 most recent unique tickers to avoid hammering the API
+
+- In `computeScore`, accept `priceData` as a parameter:
+  - Look up `priceData[trade.ticker]`
+  - If found and `currentPrice <= low52 * 1.20`, add the +15 "Near 52-week low" signal
+
+### Important:
+- Fetch price data in parallel with house/senate data in the main `/api/trades` handler
+- Use `Promise.allSettled` so a price fetch failure never breaks the whole endpoint
+
+---
+
+## Part 3 — Client (`client/src/App.jsx`)
+
+### Remove:
+- All references to `flagTier`, `flagReasons`, `TIER` config object
+- The old `computeFlags` function if it still exists client-side
+- The "🔴 High Alert" / "🟡 Flagged" filter buttons
+- The red/yellow card background classes
+
+### Update demo data:
+Replace `flagTier` and `flagReasons` on demo trades with `signalScore`, `tier`,
+`signals`, and `noise` so the demo still works without a server. Example:
+
+```js
+{ ticker:"ICHR", ..., signalScore:80, tier:"diamond",
+  signals:[
+    {label:"Obscure small-cap", pts:30},
+    {label:"First political buy in years", pts:25},
+    {label:"Near 52-week low", pts:15},
+    {label:"Filed within 1 day", pts:10},
+  ],
+  noise:[]
+}
+```
+
+### Trade card — collapsed state (the default view):
+Show per trade:
+- Ticker chip (colored by party as before)
+- Member name, party badge, chamber
+- Asset name · type · amount · Nd ago  (all on one compact line)
+- Score bar — thin colored bar, width = signalScore%
+  - Diamond: blue (`#378ADD`)
+  - High: green (`#639922`)
+  - Watch: amber (`#BA7517`)
+  - Low: gray (`#888780`)
+- Score number (e.g. `80`) and tier label pill (e.g. `Diamond`) on the right
+- A small chevron (▾) indicating it's expandable
+
+### Trade card — expanded state (on click):
+Show a "Score breakdown" section with two groups:
+1. Signal factors — each as a row: label on left, `+N` in green on right
+2. Noise discounts — each as a row: label on left, `−N` in gray on right
+3. Total score row at the bottom
+
+Then below that, the existing content:
+- Transaction date, filed date
+- AI signal (Buy/Hold/Sell) if generated
+- "Watch ticker" and "Watch member" buttons
+
+### Stats bar:
+Replace the old alert/flag counts with:
+- Trades tracked
+- Diamond tier count (score >= 60)
+- High signal count (score >= 40)
+- Watchlist items
+
+### Threshold filter:
+Add a score threshold slider (or segmented buttons) above the trade feed:
+- Options: "All", "20+", "40+", "60+" — OR a range slider from 0–80
+- Default to showing 20+ so low-signal noise is hidden by default
+- Show count of visible trades next to the filter
+
+### Sort order:
+Trades always sort by `signalScore` descending. Remove date-based sorting.
+If two trades have the same score, break ties by date (newest first).
+
+### Tier filter buttons (replace old alert/flag filters):
+```
+All  |  Diamond  |  High signal  |  Watch
+```
+
+---
+
+## Part 4 — What NOT to change
+- Data fetching URLs or cache logic
+- Watchlist and alert banner functionality
+- AI signal generation (Buy/Hold/Sell per ticker)
+- AI weekly summary
+- Tab structure (Feed, Tickers, Members, Watchlist)
+- Overall visual design, fonts, color palette
+- The compact card layout from the previous update
