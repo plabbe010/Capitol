@@ -8,3 +8,60 @@
 export interface HealthStatus {
   status: string;
 }
+
+export interface AppHealth {
+  status: string;
+  hasKey: boolean;
+  source?: string;
+  cacheKeys?: number;
+  uptime?: number;
+}
+
+export interface Trade {
+  ticker: string;
+  asset: string;
+  representative: string;
+  party: string;
+  state: string;
+  chamber: string;
+  type: string;
+  amount: string;
+  date: string;
+  filed: string;
+  committees: string[];
+}
+
+export interface RefreshResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface SignalRequest {
+  ticker: string;
+  asset: string;
+  buys: number;
+  sells: number;
+  totalValue: number;
+  members: string[];
+  flags: string[];
+  committees: string[];
+}
+
+export interface SignalResult {
+  signal: string;
+  confidence: number;
+  summary: string;
+  flag_note: string;
+}
+
+export interface SummaryRequest {
+  digest: string;
+}
+
+export interface SummaryResult {
+  summary: string;
+}
+
+export interface ErrorResponse {
+  error: string;
+}

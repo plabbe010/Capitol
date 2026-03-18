@@ -5,18 +5,31 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type {
+  AppHealth,
+  ErrorResponse,
+  HealthStatus,
+  RefreshResult,
+  SignalRequest,
+  SignalResult,
+  SummaryRequest,
+  SummaryResult,
+  Trade,
+} from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
-import type { ErrorType } from "../custom-fetch";
+import type { ErrorType, BodyType } from "../custom-fetch";
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -99,3 +112,543 @@ export function useHealthCheck<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Returns server health including data source status
+ * @summary App health with data source info
+ */
+export const getGetHealthUrl = () => {
+  return `/api/health`;
+};
+
+export const getHealth = async (options?: RequestInit): Promise<AppHealth> => {
+  return customFetch<AppHealth>(getGetHealthUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetHealthQueryKey = () => {
+  return [`/api/health`] as const;
+};
+
+export const getGetHealthQueryOptions = <
+  TData = Awaited<ReturnType<typeof getHealth>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetHealthQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealth>>> = ({
+    signal,
+  }) => getHealth({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getHealth>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetHealthQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHealth>>
+>;
+export type GetHealthQueryError = ErrorType<unknown>;
+
+/**
+ * @summary App health with data source info
+ */
+
+export function useGetHealth<
+  TData = Awaited<ReturnType<typeof getHealth>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getHealth>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetHealthQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns the most recent 150 combined House and Senate trades
+ * @summary Get combined trades
+ */
+export const getGetTradesUrl = () => {
+  return `/api/trades`;
+};
+
+export const getTrades = async (options?: RequestInit): Promise<Trade[]> => {
+  return customFetch<Trade[]>(getGetTradesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetTradesQueryKey = () => {
+  return [`/api/trades`] as const;
+};
+
+export const getGetTradesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getTrades>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getTrades>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetTradesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getTrades>>> = ({
+    signal,
+  }) => getTrades({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getTrades>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetTradesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getTrades>>
+>;
+export type GetTradesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get combined trades
+ */
+
+export function useGetTrades<
+  TData = Awaited<ReturnType<typeof getTrades>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getTrades>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetTradesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns all House trades from House Stock Watcher
+ * @summary Get House trades
+ */
+export const getGetHouseTradesUrl = () => {
+  return `/api/house`;
+};
+
+export const getHouseTrades = async (
+  options?: RequestInit,
+): Promise<Trade[]> => {
+  return customFetch<Trade[]>(getGetHouseTradesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetHouseTradesQueryKey = () => {
+  return [`/api/house`] as const;
+};
+
+export const getGetHouseTradesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getHouseTrades>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getHouseTrades>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetHouseTradesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHouseTrades>>> = ({
+    signal,
+  }) => getHouseTrades({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getHouseTrades>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetHouseTradesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHouseTrades>>
+>;
+export type GetHouseTradesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get House trades
+ */
+
+export function useGetHouseTrades<
+  TData = Awaited<ReturnType<typeof getHouseTrades>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getHouseTrades>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetHouseTradesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns all Senate trades from Senate Stock Watcher
+ * @summary Get Senate trades
+ */
+export const getGetSenateTradesUrl = () => {
+  return `/api/senate`;
+};
+
+export const getSenateTrades = async (
+  options?: RequestInit,
+): Promise<Trade[]> => {
+  return customFetch<Trade[]>(getGetSenateTradesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSenateTradesQueryKey = () => {
+  return [`/api/senate`] as const;
+};
+
+export const getGetSenateTradesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSenateTrades>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSenateTrades>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSenateTradesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSenateTrades>>> = ({
+    signal,
+  }) => getSenateTrades({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSenateTrades>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSenateTradesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSenateTrades>>
+>;
+export type GetSenateTradesQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get Senate trades
+ */
+
+export function useGetSenateTrades<
+  TData = Awaited<ReturnType<typeof getSenateTrades>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSenateTrades>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSenateTradesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Clears the server-side cache and forces fresh data on next request
+ * @summary Bust cache
+ */
+export const getRefreshCacheUrl = () => {
+  return `/api/refresh`;
+};
+
+export const refreshCache = async (
+  options?: RequestInit,
+): Promise<RefreshResult> => {
+  return customFetch<RefreshResult>(getRefreshCacheUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRefreshCacheMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof refreshCache>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof refreshCache>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["refreshCache"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof refreshCache>>,
+    void
+  > = () => {
+    return refreshCache(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshCacheMutationResult = NonNullable<
+  Awaited<ReturnType<typeof refreshCache>>
+>;
+
+export type RefreshCacheMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Bust cache
+ */
+export const useRefreshCache = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof refreshCache>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof refreshCache>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getRefreshCacheMutationOptions(options));
+};
+
+/**
+ * Returns Buy/Hold/Sell signal with confidence and explanation
+ * @summary Generate AI signal for a ticker
+ */
+export const getGenerateSignalUrl = () => {
+  return `/api/ai/signal`;
+};
+
+export const generateSignal = async (
+  signalRequest: SignalRequest,
+  options?: RequestInit,
+): Promise<SignalResult> => {
+  return customFetch<SignalResult>(getGenerateSignalUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(signalRequest),
+  });
+};
+
+export const getGenerateSignalMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSignal>>,
+    TError,
+    { data: BodyType<SignalRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateSignal>>,
+  TError,
+  { data: BodyType<SignalRequest> },
+  TContext
+> => {
+  const mutationKey = ["generateSignal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateSignal>>,
+    { data: BodyType<SignalRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateSignal(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateSignalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateSignal>>
+>;
+export type GenerateSignalMutationBody = BodyType<SignalRequest>;
+export type GenerateSignalMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Generate AI signal for a ticker
+ */
+export const useGenerateSignal = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSignal>>,
+    TError,
+    { data: BodyType<SignalRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateSignal>>,
+  TError,
+  { data: BodyType<SignalRequest> },
+  TContext
+> => {
+  return useMutation(getGenerateSignalMutationOptions(options));
+};
+
+/**
+ * Returns a plain-English summary of congressional trading patterns
+ * @summary Generate weekly AI summary
+ */
+export const getGenerateSummaryUrl = () => {
+  return `/api/ai/summary`;
+};
+
+export const generateSummary = async (
+  summaryRequest: SummaryRequest,
+  options?: RequestInit,
+): Promise<SummaryResult> => {
+  return customFetch<SummaryResult>(getGenerateSummaryUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(summaryRequest),
+  });
+};
+
+export const getGenerateSummaryMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSummary>>,
+    TError,
+    { data: BodyType<SummaryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateSummary>>,
+  TError,
+  { data: BodyType<SummaryRequest> },
+  TContext
+> => {
+  const mutationKey = ["generateSummary"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateSummary>>,
+    { data: BodyType<SummaryRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateSummary(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateSummaryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateSummary>>
+>;
+export type GenerateSummaryMutationBody = BodyType<SummaryRequest>;
+export type GenerateSummaryMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Generate weekly AI summary
+ */
+export const useGenerateSummary = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSummary>>,
+    TError,
+    { data: BodyType<SummaryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateSummary>>,
+  TError,
+  { data: BodyType<SummaryRequest> },
+  TContext
+> => {
+  return useMutation(getGenerateSummaryMutationOptions(options));
+};

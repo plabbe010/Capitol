@@ -10,6 +10,10 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: trades
+    description: Congressional stock trade data
+  - name: ai
+    description: AI-powered analysis
 paths:
   /healthz:
     get:
@@ -24,6 +28,153 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: App health with data source info
+      description: Returns server health including data source status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppHealth"
+
+  /trades:
+    get:
+      operationId: getTrades
+      tags: [trades]
+      summary: Get combined trades
+      description: Returns the most recent 150 combined House and Senate trades
+      responses:
+        "200":
+          description: List of trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /house:
+    get:
+      operationId: getHouseTrades
+      tags: [trades]
+      summary: Get House trades
+      description: Returns all House trades from House Stock Watcher
+      responses:
+        "200":
+          description: List of House trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /senate:
+    get:
+      operationId: getSenateTrades
+      tags: [trades]
+      summary: Get Senate trades
+      description: Returns all Senate trades from Senate Stock Watcher
+      responses:
+        "200":
+          description: List of Senate trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /refresh:
+    post:
+      operationId: refreshCache
+      tags: [trades]
+      summary: Bust cache
+      description: Clears the server-side cache and forces fresh data on next request
+      responses:
+        "200":
+          description: Cache cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResult"
+
+  /ai/signal:
+    post:
+      operationId: generateSignal
+      tags: [ai]
+      summary: Generate AI signal for a ticker
+      description: Returns Buy/Hold/Sell signal with confidence and explanation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignalRequest"
+      responses:
+        "200":
+          description: AI signal result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalResult"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /ai/summary:
+    post:
+      operationId: generateSummary
+      tags: [ai]
+      summary: Generate weekly AI summary
+      description: Returns a plain-English summary of congressional trading patterns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SummaryRequest"
+      responses:
+        "200":
+          description: AI summary result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SummaryResult"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +185,146 @@ components:
       required:
         - status
 
+    AppHealth:
+      type: object
+      properties:
+        status:
+          type: string
+        hasKey:
+          type: boolean
+        source:
+          type: string
+        cacheKeys:
+          type: integer
+        uptime:
+          type: integer
+      required:
+        - status
+        - hasKey
+
+    Trade:
+      type: object
+      properties:
+        ticker:
+          type: string
+        asset:
+          type: string
+        representative:
+          type: string
+        party:
+          type: string
+        state:
+          type: string
+        chamber:
+          type: string
+        type:
+          type: string
+        amount:
+          type: string
+        date:
+          type: string
+        filed:
+          type: string
+        committees:
+          type: array
+          items:
+            type: string
+      required:
+        - ticker
+        - asset
+        - representative
+        - party
+        - state
+        - chamber
+        - type
+        - amount
+        - date
+        - filed
+        - committees
+
+    RefreshResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
+      required:
+        - ok
+        - message
+
+    SignalRequest:
+      type: object
+      properties:
+        ticker:
+          type: string
+        asset:
+          type: string
+        buys:
+          type: integer
+        sells:
+          type: integer
+        totalValue:
+          type: number
+        members:
+          type: array
+          items:
+            type: string
+        flags:
+          type: array
+          items:
+            type: string
+        committees:
+          type: array
+          items:
+            type: string
+      required:
+        - ticker
+        - asset
+        - buys
+        - sells
+        - totalValue
+        - members
+        - flags
+        - committees
+
+    SignalResult:
+      type: object
+      properties:
+        signal:
+          type: string
+        confidence:
+          type: integer
+        summary:
+          type: string
+        flag_note:
+          type: string
+      required:
+        - signal
+        - confidence
+        - summary
+        - flag_note
+
+    SummaryRequest:
+      type: object
+      properties:
+        digest:
+          type: string
+      required:
+        - digest
+
+    SummaryResult:
+      type: object
+      properties:
+        summary:
+          type: string
+      required:
+        - summary
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

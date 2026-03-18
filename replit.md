@@ -91,6 +91,20 @@ Generated Zod schemas from the OpenAPI spec (e.g. `HealthCheckResponse`). Used b
 
 Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHealthCheck`, `healthCheck`).
 
+### `artifacts/capitol-watch` (`@workspace/capitol-watch`)
+
+Congressional stock disclosure tracker web app. Built with React + Vite + Tailwind CSS.
+
+- Single-page app at `/` (port 23930)
+- Data from House Stock Watcher + Senate Stock Watcher free S3 buckets (with demo-data fallback when S3 returns 403)
+- Features: live trade feed, party/type/chamber filters, expandable trade cards with AI signals, top tickers view, members view, watchlist with localStorage persistence
+- AI features powered by backend `/api/ai/signal` and `/api/ai/summary` endpoints
+- `pnpm --filter @workspace/capitol-watch run dev` — dev server
+
+### `lib/integrations-anthropic-ai` (`@workspace/integrations-anthropic-ai`)
+
+Pre-configured Anthropic client using Replit's AI Integration proxy. Exports `anthropic` instance using `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` and `AI_INTEGRATIONS_ANTHROPIC_API_KEY` env vars.
+
 ### `scripts` (`@workspace/scripts`)
 
 Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.

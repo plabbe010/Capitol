@@ -14,3 +14,115 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * Returns server health including data source status
+ * @summary App health with data source info
+ */
+export const GetHealthResponse = zod.object({
+  status: zod.string(),
+  hasKey: zod.boolean(),
+  source: zod.string().optional(),
+  cacheKeys: zod.number().optional(),
+  uptime: zod.number().optional(),
+});
+
+/**
+ * Returns the most recent 150 combined House and Senate trades
+ * @summary Get combined trades
+ */
+export const GetTradesResponseItem = zod.object({
+  ticker: zod.string(),
+  asset: zod.string(),
+  representative: zod.string(),
+  party: zod.string(),
+  state: zod.string(),
+  chamber: zod.string(),
+  type: zod.string(),
+  amount: zod.string(),
+  date: zod.string(),
+  filed: zod.string(),
+  committees: zod.array(zod.string()),
+});
+export const GetTradesResponse = zod.array(GetTradesResponseItem);
+
+/**
+ * Returns all House trades from House Stock Watcher
+ * @summary Get House trades
+ */
+export const GetHouseTradesResponseItem = zod.object({
+  ticker: zod.string(),
+  asset: zod.string(),
+  representative: zod.string(),
+  party: zod.string(),
+  state: zod.string(),
+  chamber: zod.string(),
+  type: zod.string(),
+  amount: zod.string(),
+  date: zod.string(),
+  filed: zod.string(),
+  committees: zod.array(zod.string()),
+});
+export const GetHouseTradesResponse = zod.array(GetHouseTradesResponseItem);
+
+/**
+ * Returns all Senate trades from Senate Stock Watcher
+ * @summary Get Senate trades
+ */
+export const GetSenateTradesResponseItem = zod.object({
+  ticker: zod.string(),
+  asset: zod.string(),
+  representative: zod.string(),
+  party: zod.string(),
+  state: zod.string(),
+  chamber: zod.string(),
+  type: zod.string(),
+  amount: zod.string(),
+  date: zod.string(),
+  filed: zod.string(),
+  committees: zod.array(zod.string()),
+});
+export const GetSenateTradesResponse = zod.array(GetSenateTradesResponseItem);
+
+/**
+ * Clears the server-side cache and forces fresh data on next request
+ * @summary Bust cache
+ */
+export const RefreshCacheResponse = zod.object({
+  ok: zod.boolean(),
+  message: zod.string(),
+});
+
+/**
+ * Returns Buy/Hold/Sell signal with confidence and explanation
+ * @summary Generate AI signal for a ticker
+ */
+export const GenerateSignalBody = zod.object({
+  ticker: zod.string(),
+  asset: zod.string(),
+  buys: zod.number(),
+  sells: zod.number(),
+  totalValue: zod.number(),
+  members: zod.array(zod.string()),
+  flags: zod.array(zod.string()),
+  committees: zod.array(zod.string()),
+});
+
+export const GenerateSignalResponse = zod.object({
+  signal: zod.string(),
+  confidence: zod.number(),
+  summary: zod.string(),
+  flag_note: zod.string(),
+});
+
+/**
+ * Returns a plain-English summary of congressional trading patterns
+ * @summary Generate weekly AI summary
+ */
+export const GenerateSummaryBody = zod.object({
+  digest: zod.string(),
+});
+
+export const GenerateSummaryResponse = zod.object({
+  summary: zod.string(),
+});

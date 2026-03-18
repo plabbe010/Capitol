@@ -1,0 +1,12 @@
+packages:
+  "lucide-react": "Beautiful icons for UI elements"
+  "clsx": "Class merging utility for Tailwind"
+  "tailwind-merge": "Class merging utility for Tailwind"
+  "date-fns": "Date formatting utilities"
+
+images: []
+
+notes:
+  - "The frontend relies on /api/health to check if it should auto-fetch live data."
+  - "The AI calls are wired through /api/ai/signal and /api/ai/summary."
+  - "Using raw fetch calls instead of React Query as requested to manage the custom demo fallback state directly."

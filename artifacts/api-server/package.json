@@ -11,10 +11,14 @@
   "dependencies": {
     "@workspace/db": "workspace:*",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/integrations-anthropic-ai": "workspace:*",
     "drizzle-orm": "catalog:",
     "express": "^5",
     "cookie-parser": "^1.4.7",
-    "cors": "^2"
+    "cors": "^2",
+    "axios": "^1.9.0",
+    "node-cache": "^5.1.2",
+    "express-rate-limit": "^7.5.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",
