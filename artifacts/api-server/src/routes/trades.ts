@@ -164,7 +164,7 @@ function computeFlags(trade: Trade, allTrades: Trade[]): { flagTier: "alert" | "
     ];
     if (oppositeMembers.length >= 2) {
       alertReasons.push(
-        `Bipartisan signal — 2+ members from both parties buying within 14 days`
+        `Bipartisan signal — 2+ opposite-party members buying the same ticker within 14 days`
       );
     }
   }
@@ -295,8 +295,9 @@ router.get("/trades", async (_req, res) => {
 });
 
 // /house and /senate return normalized records WITHOUT flag enrichment.
-// computeFlags() requires the full combined dataset for bipartisan and
-// first-purchase context, which these chamber-filtered views don't have.
+// computeFlags() requires the full combined dataset for bipartisan context
+// (counting opposite-party members across both chambers); these chamber-
+// filtered views don't have that cross-chamber data.
 // Consumers that need flagTier/flagReasons should use /trades instead.
 router.get("/house", async (_req, res) => {
   try {
