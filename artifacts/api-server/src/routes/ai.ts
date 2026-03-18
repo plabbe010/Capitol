@@ -70,7 +70,7 @@ router.post("/ai/summary", async (req, res) => {
   try {
     const { digest } = req.body as { digest: string };
 
-    const prompt = `You are a financial journalist covering political transparency. Based on these recent congressional stock disclosures:\n\n${digest}\n\nWrite a 3-sentence market insight. Identify sector patterns, note anything suspicious, and flag what retail investors should watch. Be direct and specific.`;
+    const prompt = `You are a sharp financial intelligence analyst writing a morning briefing for sophisticated investors. Here are the top congressional stock trades ranked by signal score:\n\n${digest}\n\nWrite exactly 3–5 bullet points. Rules:\n- Each bullet starts with •\n- One punchy sentence per bullet, max 20 words\n- Lead with the single most unusual or suspicious trade\n- Name the ticker, member, and what makes it interesting (committee overlap, bipartisan buys, obscure small-cap, etc.)\n- Make the final bullet a forward-looking sector watch sentence\n- No disclaimers, no hedging, no legal language\n- Plain text only, no bold, no markdown`;
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-6",

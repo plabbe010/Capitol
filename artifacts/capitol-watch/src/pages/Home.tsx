@@ -382,29 +382,16 @@ export default function CapitolWatch() {
   async function generateSummary() {
     setSummaryLoading(true);
 
-    const diamondTrades = trades.filter(t => t.tier === "diamond");
-    const highTrades    = trades.filter(t => t.tier === "high");
-    const otherTrades   = trades.filter(t => t.tier === "watch" || t.tier === "low");
-
-    const topDiamond = diamondTrades.slice(0, 5).map(t =>
-      `💎 DIAMOND (${t.signalScore}): ${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount} | Signals: ${(t.signals||[]).map(s=>s.label).join("; ")}`
-    );
-    const topHigh = highTrades.slice(0, 3).map(t =>
-      `📈 HIGH (${t.signalScore}): ${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount} | Signals: ${(t.signals||[]).map(s=>s.label).join("; ")}`
-    );
-    const topOther = otherTrades
-      .sort((a, b) => amountMid(b.amount) - amountMid(a.amount))
+    const topTrades = [...trades]
+      .sort((a, b) => b.signalScore - a.signalScore)
       .slice(0, 5)
-      .map(t => `${t.representative} (${t.party}) ${t.type} ${t.ticker} — ${t.amount}`);
+      .map(t =>
+        `${t.ticker} (${t.asset}) — ${t.representative} (${t.party}) — Score: ${t.signalScore} — Signals: ${(t.signals||[]).map(s=>s.label).join(", ")}`
+      )
+      .join("\n");
 
-    const digest = [
-      topDiamond.length ? `DIAMOND TIER TRADES:\n${topDiamond.join("\n")}` : "",
-      topHigh.length    ? `HIGH SIGNAL TRADES:\n${topHigh.join("\n")}` : "",
-      topOther.length   ? `OTHER NOTABLE TRADES:\n${topOther.join("\n")}` : "",
-    ].filter(Boolean).join("\n\n");
-    
     try {
-      const parsed = await apiGenerateSummary({ digest });
+      const parsed = await apiGenerateSummary({ digest: topTrades });
       setWeekSummary(parsed.summary || "Could not parse summary.");
     } catch { 
       setWeekSummary("Could not generate summary."); 
@@ -923,7 +910,13 @@ export default function CapitolWatch() {
                       <span className="text-sm font-medium">Analyzing weekly patterns...</span>
                     </div>
                   ) : weekSummary ? (
-                    <p className="text-sm leading-relaxed text-blue-50">{weekSummary}</p>
+                    <div className="space-y-1">
+                      {weekSummary.split("•").filter(s => s.trim()).map((bullet, i) => (
+                        <p key={i} style={{ fontSize: "13px", lineHeight: 1.8, fontWeight: "normal" }} className="text-blue-50">
+                          • {bullet.trim()}
+                        </p>
+                      ))}
+                    </div>
                   ) : (
                     <p className="text-sm text-blue-200/70 text-center py-4">
                       Generate an AI summary of congressional trading patterns based on the latest disclosures.
