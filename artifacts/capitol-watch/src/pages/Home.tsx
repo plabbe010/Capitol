@@ -4,6 +4,7 @@ import {
   useGetHealth,
   useGetTrades,
   useRefreshCache,
+  getGetTradesQueryKey,
   generateSignal as apiGenerateSignal,
   generateSummary as apiGenerateSummary,
 } from "@workspace/api-client-react";
@@ -17,7 +18,8 @@ import {
   ChevronRight,
   TrendingUp,
   Activity,
-  AlertCircle
+  AlertCircle,
+  X
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -193,6 +195,7 @@ export default function CapitolWatch() {
     refetch: refetchTrades,
   } = useGetTrades({
     query: {
+      queryKey: getGetTradesQueryKey(),
       enabled: !!healthData?.hasKey,
       retry: 1,
     },
@@ -271,7 +274,7 @@ export default function CapitolWatch() {
         flags,
         committees: trade.committees || [],
       });
-      setSignals(p => ({ ...p, [key]: parsed }));
+      setSignals(p => ({ ...p, [key]: parsed as SignalResult }));
     } catch {
       setSignals(p => ({ ...p, [key]: { signal: "Hold", confidence: 50, summary: "Could not generate signal.", flag_note: "" } }));
     }
