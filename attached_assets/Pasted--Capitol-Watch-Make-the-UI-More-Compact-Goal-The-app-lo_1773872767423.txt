@@ -1,0 +1,62 @@
+# Capitol Watch — Make the UI More Compact
+
+## Goal
+The app looks great but takes up too much vertical space. Make everything denser
+so users can see more trades without scrolling. Think of how Bloomberg or a
+trading terminal uses space — tight rows, smaller text, less padding everywhere.
+
+---
+
+## Specific changes to make
+
+### Stats bar (the row with 150, 125, 30, 120, 0)
+- Reduce the number height from ~40px to around 28px font size
+- Reduce padding inside each stat cell from ~16px to 10px top/bottom
+- Make the label text 11px and the sub-label 11px (they can be on the same line,
+  separated by a · if needed)
+- Example target: `150  all disclosures` on two lines but tight, not airy
+
+### Trade cards
+This is the biggest win. Currently each card is too tall.
+- Reduce card padding from ~16px to 10px vertical, 14px horizontal
+- Reduce margin between cards from 8px to 4px
+- Make the member name 13px instead of 14-15px
+- Make the asset/ticker line 12px
+- Make the amount and days-ago text 11px
+- The ticker chip (MSFT, META square) — reduce from 44px to 36px
+- Put the Buy/Sell badge, amount, and days-ago all on ONE line on the right side
+  instead of stacking them vertically
+
+### The HIGH ALERT label strip above each card
+- Currently it sits above the card as a separate line, adding height
+- Move it INSIDE the card as the first line, in a smaller font (11px)
+- This removes the gap between the label and the card
+
+### Filter row
+- The two rows of filters (search + party/type/chamber on one row, then
+  FILTER: All trades / Alerts only / Flagged on a second row) — combine into
+  one row if possible, or reduce vertical padding on the filter container
+- Reduce filter button padding to 4px 10px
+
+### Section spacing
+- Reduce the gap between the filter section and the first trade card from ~20px to 8px
+- Reduce padding inside the AI summary card
+
+### Tab bar
+- Reduce tab padding from 12px to 8px top/bottom
+
+---
+
+## What NOT to change
+- Colors, fonts, or the overall visual identity
+- The flagging logic or data
+- The two-tier alert/flag system
+- Any functionality (watchlist, filters, AI signals, expand on click)
+- The header
+
+---
+
+## Target feel
+Each trade card should be about 60-70px tall in its collapsed state (currently
+feels like ~90-100px). The whole feed should feel like a dense, scannable list
+— more like a news ticker or a trading app, less like a card-based mobile app.
