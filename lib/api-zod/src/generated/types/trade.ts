@@ -18,4 +18,6 @@ export interface Trade {
   date: string;
   filed: string;
   committees: string[];
+  flagTier: "alert" | "flag" | null;
+  flagReasons: string[];
 }

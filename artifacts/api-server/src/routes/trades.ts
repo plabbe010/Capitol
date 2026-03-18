@@ -299,6 +299,10 @@ router.get("/trades", async (_req, res) => {
   }
 });
 
+// /house and /senate return normalized records WITHOUT flag enrichment.
+// computeFlags() requires the full combined dataset for bipartisan and
+// first-purchase context, which these chamber-filtered views don't have.
+// Consumers that need flagTier/flagReasons should use /trades instead.
 router.get("/house", async (_req, res) => {
   try {
     const raw = await fetchAll();

@@ -43,6 +43,8 @@ export const GetTradesResponseItem = zod.object({
   date: zod.string(),
   filed: zod.string(),
   committees: zod.array(zod.string()),
+  flagTier: zod.enum(["alert", "flag"]).nullable(),
+  flagReasons: zod.array(zod.string()),
 });
 export const GetTradesResponse = zod.array(GetTradesResponseItem);
 
