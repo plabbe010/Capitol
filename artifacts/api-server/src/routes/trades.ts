@@ -1,10 +1,13 @@
 import { Router, type IRouter } from "express";
 import axios from "axios";
 import NodeCache from "node-cache";
+import { db } from "@workspace/db";
+import { trades as tradesTable } from "@workspace/db";
+import { desc, gte, sql } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-const cache     = new NodeCache({ stdTTL: 900 });   // 15-min trades cache
+const cache      = new NodeCache({ stdTTL: 900 });   // 15-min trades cache
 const priceCache = new NodeCache({ stdTTL: 3600 });  // 60-min price cache
 
 const QUIVER_URL = "https://api.quiverquant.com/beta/live/congresstrading";
@@ -34,7 +37,7 @@ const LARGE_CAPS = new Set([
   "JNJ","PFE","MRK","ABBV","LLY","BMY","AMGN","GILD","UNH","CVS","HCA",
   // Energy majors
   "XOM","CVX","COP","SLB","OXY","MPC","PSX","VLO",
-  "KMI","WMB","ET","EPD","OKE",   // pipeline / midstream — well-known, heavily traded
+  "KMI","WMB","ET","EPD","OKE",
   // Defense primes (large, well-covered)
   "LMT","RTX","NOC","BA","GD","LHX","HII",
   // Consumer / Retail
@@ -77,7 +80,7 @@ const MEMBER_COMMITTEES: Record<string, string[]> = {
   "Suzan DelBene":              ["Ways & Means", "Agriculture"],
   "Debbie Wasserman Schultz":   ["Appropriations", "Energy & Water"],
   "Kevin McCarthy":             ["Rules"],
-  "Thomas H. Kean Jr":         ["Financial Services"],
+  "Thomas H. Kean Jr":          ["Financial Services"],
   "Cleo Fields":                ["Financial Services", "Judiciary"],
   "Nancy Pelosi":               ["Financial Services"],
   "Katie Porter":               ["Oversight"],
@@ -235,8 +238,6 @@ function computeScore(
   const isLargeCap = LARGE_CAPS.has(trade.ticker);
   const isSell     = !isThisBuy;
 
-  // ── ADDITIVE SIGNALS ────────────────────────────────────────────────────────
-
   // 1. Obscure / small-cap ticker (+30) — purchase only
   if (isThisBuy && !isLargeCap) {
     signals.push({ label: "Obscure small-cap", pts: 30 });
@@ -256,7 +257,7 @@ function computeScore(
     }
   }
 
-  // 3. Bipartisan buy (+15) — any D & R bought same ticker within 30 days
+  // 3. Bipartisan buy (+15)
   if (isThisBuy && (trade.party === "D" || trade.party === "R")) {
     const oppositeParty = trade.party === "D" ? "R" : "D";
     const hasOpposite = allTrades.some(
@@ -279,13 +280,14 @@ function computeScore(
   }
 
   // 5. Multiple members buying same obscure ticker (+25)
+  // Threshold: >= 2 OTHER buyers (3 total) to prevent stacking with +30 obscure signal
   if (isThisBuy && !isLargeCap) {
     const otherBuyers = new Set(
       allTrades
         .filter(t => t.ticker === trade.ticker && isBuy(t.type) && t.representative !== trade.representative)
         .map(t => t.representative)
     );
-    if (otherBuyers.size >= 1) {
+    if (otherBuyers.size >= 2) {
       signals.push({ label: `${otherBuyers.size + 1} members buying this obscure ticker`, pts: 25 });
     }
   }
@@ -295,36 +297,31 @@ function computeScore(
     signals.push({ label: `Filed within ${gap} day${gap === 1 ? "" : "s"} — unusually prompt`, pts: 10 });
   }
 
-  // 7. Near the 45-day legal limit (+8) — 40+ days
+  // 7. Near the 45-day legal limit (+8)
   if (gap >= 40 && trade.date && trade.filed) {
     signals.push({ label: `Filed ${gap}d after trade — near the 45-day limit`, pts: 8 });
   }
 
   // ── SUBTRACTIVE NOISE ───────────────────────────────────────────────────────
 
-  // 1. Household name ticker (−40)
   if (isLargeCap) {
     noise.push({ label: "Household name ticker", pts: -40 });
   }
 
-  // 2. High-volume congressional stock (−15) — 10+ trades in dataset
   const tickerCount = allTrades.filter(t => t.ticker === trade.ticker).length;
   if (tickerCount >= 10) {
     noise.push({ label: "Frequently traded by Congress", pts: -15 });
   }
 
-  // 3. Known frequent trader (−15) — 20+ trades in dataset
   const memberCount = allTrades.filter(t => t.representative === trade.representative).length;
   if (memberCount >= 20) {
     noise.push({ label: "High-volume congressional trader", pts: -15 });
   }
 
-  // 4. Sell transaction (−10)
   if (isSell) {
     noise.push({ label: "Sell transaction (less predictive)", pts: -10 });
   }
 
-  // ── FINAL SCORE ─────────────────────────────────────────────────────────────
   const raw = [
     ...signals.map(s => s.pts),
     ...noise.map(n => n.pts),
@@ -341,7 +338,7 @@ function computeScore(
 }
 
 const COMMITTEE_URL = "https://theunitedstates.io/congress-legislators/committee-membership-current.json";
-const committeeCache = new NodeCache({ stdTTL: 86400 }); // 24-hour cache — committee data is stable
+const committeeCache = new NodeCache({ stdTTL: 86400 });
 
 async function fetchCommitteeMap(): Promise<Record<string, string[]>> {
   const cached = committeeCache.get<Record<string, string[]>>("committee_map");
@@ -361,7 +358,6 @@ async function fetchCommitteeMap(): Promise<Record<string, string[]>> {
         map[key].push(cmteName);
       }
     }
-    // Merge with hardcoded fallback (hardcoded takes precedence for known members)
     for (const [name, cmtes] of Object.entries(MEMBER_COMMITTEES)) {
       const key = name.toLowerCase();
       map[key] = [...new Set([...cmtes, ...(map[key] || [])])];
@@ -371,7 +367,6 @@ async function fetchCommitteeMap(): Promise<Record<string, string[]>> {
     return map;
   } catch {
     console.warn("[committees] fetch failed, using static fallback");
-    // Fall back to static map
     const fallback: Record<string, string[]> = {};
     for (const [name, cmtes] of Object.entries(MEMBER_COMMITTEES)) {
       fallback[name.toLowerCase()] = cmtes;
@@ -379,6 +374,7 @@ async function fetchCommitteeMap(): Promise<Record<string, string[]>> {
     return fallback;
   }
 }
+
 async function fetchAll(): Promise<RawQuiverTrade[]> {
   const cached = cache.get<RawQuiverTrade[]>(CACHE_KEY);
   if (cached) {
@@ -399,7 +395,7 @@ function normalizeRecord(t: RawQuiverTrade): Omit<Trade, "signalScore" | "tier" 
   const chamber = t.House === "Senators" ? "Senate" : "House";
   return {
     ticker:         t.Ticker || "—",
-    asset:          t.Description || "—",
+    asset:          t.Description || t.Ticker || "—",
     representative: t.Representative || "Unknown",
     party:          t.Party || "?",
     state:          "—",
@@ -410,6 +406,124 @@ function normalizeRecord(t: RawQuiverTrade): Omit<Trade, "signalScore" | "tier" 
     filed:          t.ReportDate || "",
     committees:     [],
   };
+}
+
+// ── DB persistence ────────────────────────────────────────────────────────────
+async function upsertTrades(enriched: Trade[]): Promise<void> {
+  if (!enriched.length) return;
+
+  // FIX: Deduplicate within the incoming batch before inserting.
+  // Quiver sometimes sends the same trade twice in a single response payload.
+  // When two identical rows land in the same chunk, Postgres sees an intra-batch
+  // conflict — onConflictDoUpdate only handles conflicts against *existing* rows,
+  // not duplicates within the VALUES list itself. The result is the entire chunk
+  // gets rejected, silently dropping ~60–70% of trades.
+  const seen = new Set<string>();
+  const deduped = enriched.filter(t => {
+    const key = `${t.representative}|${t.ticker}|${t.date}|${t.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const skipped = enriched.length - deduped.length;
+  if (skipped > 0) {
+    console.log(`[db] deduped ${skipped} duplicate trades before insert`);
+  }
+
+  const CHUNK = 50;
+  for (let i = 0; i < deduped.length; i += CHUNK) {
+    const chunk = deduped.slice(i, i + CHUNK);
+    try {
+      await db
+        .insert(tradesTable)
+        .values(
+          chunk.map(t => ({
+            representative: t.representative,
+            ticker:         t.ticker,
+            date:           t.date,
+            type:           t.type,
+            asset:          t.asset,
+            party:          t.party,
+            state:          t.state,
+            chamber:        t.chamber,
+            amount:         t.amount,
+            filed:          t.filed,
+            committees:     t.committees,
+            signalScore:    t.signalScore,
+            tier:           t.tier,
+            signals:        t.signals,
+            noise:          t.noise,
+            firstSeenAt:    new Date(),
+            lastSeenAt:     new Date(),
+          }))
+        )
+        .onConflictDoUpdate({
+          target: [
+            tradesTable.representative,
+            tradesTable.ticker,
+            tradesTable.date,
+            tradesTable.type,
+          ],
+          set: {
+            // Re-score on every upsert in case signals change
+            asset:       sql`excluded.asset`,
+            signalScore: sql`excluded.signal_score`,
+            tier:        sql`excluded.tier`,
+            signals:     sql`excluded.signals`,
+            noise:       sql`excluded.noise`,
+            committees:  sql`excluded.committees`,
+            lastSeenAt:  sql`now()`,
+          },
+        });
+    } catch (err) {
+      // Non-fatal — log and continue. App still works off in-memory data.
+      console.error(`[db] upsert chunk ${i}–${i + CHUNK} failed:`, err);
+    }
+  }
+  console.log(`[db] upserted ${deduped.length} trades`);
+}
+
+// Read from DB — returns up to 200 trades from the last 90 days.
+// FIX: Sort tiebreaker is now `filed` (the ReportDate from Quiver — when the
+// member actually disclosed the trade) rather than `firstSeenAt` (when the
+// row entered our DB). All trades from a single Quiver pull share the same
+// firstSeenAt timestamp, so it was useless as a recency tiebreaker.
+async function readTradesFromDb(): Promise<Trade[] | null> {
+  try {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 90);
+
+    const rows = await db
+      .select()
+      .from(tradesTable)
+      .where(gte(tradesTable.firstSeenAt, cutoff))
+      .orderBy(desc(tradesTable.signalScore), desc(tradesTable.filed))
+      .limit(200);
+
+    if (!rows.length) return null;
+
+    return rows.map(r => ({
+      ticker:         r.ticker,
+      asset:          r.asset || r.ticker,
+      representative: r.representative,
+      party:          r.party || "?",
+      state:          r.state || "—",
+      chamber:        r.chamber || "House",
+      type:           r.type,
+      amount:         r.amount || "$1,001 - $15,000",
+      date:           r.date,
+      filed:          r.filed || "",
+      committees:     (r.committees as string[]) || [],
+      signalScore:    r.signalScore,
+      tier:           r.tier as "diamond" | "high" | "watch" | "low",
+      signals:        (r.signals as { label: string; pts: number }[]) || [],
+      noise:          (r.noise   as { label: string; pts: number }[]) || [],
+    }));
+  } catch (err) {
+    console.error("[db] read failed:", err);
+    return null;
+  }
 }
 
 export { cache };
@@ -424,7 +538,6 @@ router.get("/trades", async (_req, res) => {
       .map(normalizeRecord)
       .filter((t) => t.ticker && t.ticker !== "—" && t.date);
 
-    // Fetch price data and committee map in parallel (both non-blocking)
     const uniqueTickers = [...new Set(normalized.map(t => t.ticker))].slice(0, 50);
     const [priceData, committeeMap] = await Promise.all([
       fetchPriceData(uniqueTickers).catch(() => ({})),
@@ -436,36 +549,44 @@ router.get("/trades", async (_req, res) => {
       return { ...trade, signalScore, tier, signals, noise };
     });
 
-    // Sort by signalScore descending; ties broken by date (newest first)
-    const sorted = enriched
+    // Persist to DB in the background — don't block the response
+    upsertTrades(enriched).catch(err => console.error("[db] background upsert failed:", err));
+
+    // Read from DB to return full 90-day history (not just today's Quiver window)
+    const dbTrades = await readTradesFromDb();
+
+    // Fall back to just the fresh Quiver data if DB read fails
+    const result = dbTrades ?? enriched
       .sort((a, b) => {
         const scoreDiff = b.signalScore - a.signalScore;
         if (scoreDiff !== 0) return scoreDiff;
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
+        return (b.filed || b.date) > (a.filed || a.date) ? 1 : -1;
       })
       .slice(0, 200);
 
-    res.json(sorted);
+    res.json(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("Trades fetch error:", msg);
+
+    // Last resort: try to serve from DB even if Quiver is down
+    const dbFallback = await readTradesFromDb().catch(() => null);
+    if (dbFallback) {
+      console.log("[db] serving from DB fallback after Quiver error");
+      return res.json(dbFallback);
+    }
+
     res.status(500).json({ error: msg });
   }
 });
 
-// /house and /senate return normalized records without score enrichment.
-// computeScore() requires the full combined dataset for bipartisan context.
-// Consumers that need scored data should use /trades instead.
 router.get("/house", async (_req, res) => {
   try {
     const raw = await fetchAll();
-    const house = raw
-      .filter((t) => t.House !== "Senators")
-      .map(normalizeRecord);
+    const house = raw.filter((t) => t.House !== "Senators").map(normalizeRecord);
     res.json(house);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("House fetch error:", msg);
     res.status(500).json({ error: msg });
   }
 });
@@ -473,13 +594,10 @@ router.get("/house", async (_req, res) => {
 router.get("/senate", async (_req, res) => {
   try {
     const raw = await fetchAll();
-    const senate = raw
-      .filter((t) => t.House === "Senators")
-      .map(normalizeRecord);
+    const senate = raw.filter((t) => t.House === "Senators").map(normalizeRecord);
     res.json(senate);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("Senate fetch error:", msg);
     res.status(500).json({ error: msg });
   }
 });

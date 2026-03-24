@@ -23,7 +23,13 @@ import {
   CircleDot,
   ChevronDown,
   Minus,
+  Gem,
 } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Tooltip as RechartsTooltip, ReferenceLine, ResponsiveContainer,
+} from "recharts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface ScoreSignal {
@@ -54,6 +60,16 @@ export interface SignalResult {
   confidence: number;
   summary: string;
   flag_note: string;
+}
+
+export interface TickerDetailData {
+  ticker: string;
+  asset: string;
+  priceHistory: { date: string; close: number }[];
+  low52: number;
+  high52: number;
+  currentPrice: number;
+  trades: Trade[];
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -273,7 +289,7 @@ export default function CapitolWatch() {
   const [filterType, setFilterType] = useState("All");
   const [filterChamber, setFilterChamber] = useState("All");
   const [filterTier, setFilterTier] = useState("All");
-  const [filterScore, setFilterScore] = useState(20); // default 20+ threshold
+  const [filterScore, setFilterScore] = useState(20);
   const [search, setSearch] = useState("");
 
   const [signals, setSignals] = useState<Record<string, SignalResult>>(store.signals || {});
@@ -283,6 +299,12 @@ export default function CapitolWatch() {
 
   const [expandedTrade, setExpandedTrade] = useState<number | null>(null);
   const [newAlerts, setNewAlerts] = useState<Trade[]>([]);
+
+  // ── Ticker detail drawer ────────────────────────────────────────────────────
+  const [drawerTicker, setDrawerTicker] = useState<string | null>(null);
+  const [drawerData, setDrawerData] = useState<TickerDetailData | null>(null);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState("");
 
   const seenRef = useRef(loadSeen());
 
@@ -401,9 +423,23 @@ export default function CapitolWatch() {
     setSummaryLoading(false);
   }
 
+  async function openTickerDrawer(ticker: string) {
+    setDrawerTicker(ticker);
+    setDrawerData(null);
+    setDrawerError("");
+    setDrawerLoading(true);
+    try {
+      const res = await fetch(`/ticker/${encodeURIComponent(ticker)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as TickerDetailData;
+      setDrawerData(data);
+    } catch (err) {
+      setDrawerError(err instanceof Error ? err.message : "Failed to load chart data");
+    }
+    setDrawerLoading(false);
+  }
+
   // ── Derived State ───────────────────────────────────────────────────────────
-  // Trades are already sorted by signalScore descending from the backend.
-  // For demo data, sort them client-side as well.
   const sortedTrades = [...trades].sort((a, b) => {
     const scoreDiff = b.signalScore - a.signalScore;
     if (scoreDiff !== 0) return scoreDiff;
@@ -643,9 +679,9 @@ export default function CapitolWatch() {
                       className={cn(
                         "px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border",
                         filterTier === f.key
-                          ? f.key === "diamond" ? "bg-blue-100 text-blue-800 border-blue-200"
-                          : f.key === "high"    ? "bg-green-100 text-green-800 border-green-200"
-                          : f.key === "watch"   ? "bg-amber-100 text-amber-800 border-amber-200"
+                          ? f.key === "diamond" ? "bg-red-100 text-red-800 border-red-200"
+                          : f.key === "high"    ? "bg-amber-100 text-amber-800 border-amber-200"
+                          : f.key === "watch"   ? "bg-green-100 text-green-800 border-green-200"
                           : "bg-primary/10 text-primary border-primary/20"
                           : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
                       )}
@@ -726,7 +762,11 @@ export default function CapitolWatch() {
                                 {trade.chamber} · {trade.state}
                               </span>
                             </div>
-                            <div className="text-[12px] text-gray-600 truncate">{trade.asset} <span className="text-gray-400">({trade.ticker})</span></div>
+                            <div className="text-[12px] text-gray-600 truncate">
+                              {/* FIX: fallback to ticker name if asset description is missing */}
+                              {trade.asset && trade.asset !== "—" ? trade.asset : trade.ticker}
+                              {" "}<span className="text-gray-400">({trade.ticker})</span>
+                            </div>
                           </div>
 
                           {/* Right: score bar + score + tier + meta */}
@@ -882,6 +922,14 @@ export default function CapitolWatch() {
                                     <Star className={cn("w-4 h-4", watchlist.includes(trade.ticker) && "fill-indigo-500 text-indigo-500")} />
                                     {watchlist.includes(trade.ticker) ? "Ticker Watched" : "Watch Ticker"}
                                   </button>
+
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openTickerDrawer(trade.ticker); }}
+                                    className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors flex justify-center items-center gap-2 border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                  >
+                                    <TrendingUp className="w-4 h-4" />
+                                    View 1Y Chart
+                                  </button>
                                 </div>
                               </div>
 
@@ -1005,6 +1053,7 @@ export default function CapitolWatch() {
                       <div className="flex items-center gap-2">
                         {t.signalCount > 0 && (
                           <div className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-[10px] font-bold border border-blue-100 flex items-center gap-1">
+                            {/* FIX: Gem is now properly imported */}
                             <Gem className="w-3 h-3" /> {t.signalCount}
                           </div>
                         )}
@@ -1143,10 +1192,50 @@ export default function CapitolWatch() {
               <p className="text-sm text-gray-500 mt-1">Star any ticker or member in the other tabs to track their activity here and get alerts on new trades.</p>
             </div>
 
+            {/* FIX: Always show watched tickers/members even when no trades match */}
+            {(watchlist.length > 0 || watchMembers.length > 0) && (
+              <div className="bg-white rounded-2xl border border-card-border p-4 mb-4 flex flex-wrap gap-6">
+                {watchlist.length > 0 && (
+                  <div>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Watching Tickers</div>
+                    <div className="flex flex-wrap gap-2">
+                      {watchlist.map(t => (
+                        <div key={t} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-semibold border border-indigo-100 flex items-center gap-1.5">
+                          {t}
+                          <button onClick={() => toggleTicker(t)} className="text-indigo-400 hover:text-indigo-900">
+                            <X className="w-3 h-3"/>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {watchMembers.length > 0 && (
+                  <div>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Watching Members</div>
+                    <div className="flex flex-wrap gap-2">
+                      {watchMembers.map(m => (
+                        <div key={m} className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold border border-amber-100 flex items-center gap-1.5">
+                          {m.split(" ").slice(-1)[0]}
+                          <button onClick={() => toggleMember(m)} className="text-amber-400 hover:text-amber-900">
+                            <X className="w-3 h-3"/>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {watchTrades.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
                 <Star className="w-10 h-10 text-gray-200 mx-auto mb-4" />
-                <p className="text-gray-500 max-w-sm mx-auto">Star any ticker or member in the other tabs to track their activity here and get alerts on new trades.</p>
+                <p className="text-gray-500 max-w-sm mx-auto">
+                  {watchlist.length + watchMembers.length > 0
+                    ? "No trades yet for your watched items."
+                    : "Star any ticker or member in the other tabs to track their activity here and get alerts on new trades."}
+                </p>
               </div>
             ) : (
               <div className="space-y-1">
@@ -1168,7 +1257,11 @@ export default function CapitolWatch() {
                               {trade.party}
                             </span>
                           </div>
-                          <div className="text-[12px] text-gray-600 truncate">{trade.asset} <span className="text-gray-400">({trade.ticker})</span></div>
+                          <div className="text-[12px] text-gray-600 truncate">
+                            {/* FIX: fallback to ticker name if asset description is missing */}
+                            {trade.asset && trade.asset !== "—" ? trade.asset : trade.ticker}
+                            {" "}<span className="text-gray-400">({trade.ticker})</span>
+                          </div>
                           {(trade.signals || []).length > 0 && (
                             <div className="text-[11px] text-gray-500 truncate">{(trade.signals || [])[0].label}</div>
                           )}
@@ -1198,6 +1291,171 @@ export default function CapitolWatch() {
         )}
 
       </div>
+
+      {/* ══ TICKER DETAIL DRAWER ════════════════════════════════════════════ */}
+
+      <Sheet open={!!drawerTicker} onOpenChange={(open) => { if (!open) { setDrawerTicker(null); setDrawerData(null); setDrawerError(""); } }}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>
+              {drawerData ? `${drawerData.ticker} — ${drawerData.asset}` : drawerTicker ?? ""}
+            </SheetTitle>
+          </SheetHeader>
+
+          {drawerLoading && (
+            <div className="flex items-center justify-center py-20 gap-3 text-indigo-600">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-medium">Loading chart data...</span>
+            </div>
+          )}
+
+          {drawerError && (
+            <div className="mt-6 flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 rounded-xl px-4 py-3 text-sm">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {drawerError}
+            </div>
+          )}
+
+          {drawerData && !drawerLoading && (
+            <div className="mt-4 space-y-6">
+
+              {/* Price stats row */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                  <div className="text-xs text-gray-500 mb-1">Current</div>
+                  <div className="font-bold text-gray-900">${drawerData.currentPrice.toFixed(2)}</div>
+                </div>
+                <div className="bg-red-50 rounded-xl p-3 text-center border border-red-100">
+                  <div className="text-xs text-gray-500 mb-1">52W Low</div>
+                  <div className="font-bold text-red-700">${drawerData.low52.toFixed(2)}</div>
+                </div>
+                <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
+                  <div className="text-xs text-gray-500 mb-1">52W High</div>
+                  <div className="font-bold text-green-700">${drawerData.high52.toFixed(2)}</div>
+                </div>
+              </div>
+
+              {/* 1Y Price chart */}
+              <div>
+                <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-2">
+                  1-year price history — vertical lines = congressional disclosures
+                </div>
+                {drawerData.priceHistory.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <AreaChart data={drawerData.priceHistory} margin={{ top: 8, right: 4, left: -10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 10, fill: "#9ca3af" }}
+                        tickFormatter={(d: string) => d.slice(5)}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={{ fontSize: 10, fill: "#9ca3af" }}
+                        tickFormatter={(v: number) => `$${v}`}
+                        width={48}
+                      />
+                      <RechartsTooltip
+                        formatter={(v: number) => [`$${v.toFixed(2)}`, "Price"]}
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
+                      />
+                      {drawerData.trades.map((t, i) => (
+                        <ReferenceLine
+                          key={i}
+                          x={t.date}
+                          stroke={!isBuy(t) ? "#f97316" : t.party === "D" ? "#2563eb" : "#dc2626"}
+                          strokeWidth={2}
+                          strokeOpacity={0.75}
+                          label={{ value: t.party, position: "insideTopLeft", fontSize: 9, fill: !isBuy(t) ? "#f97316" : t.party === "D" ? "#2563eb" : "#dc2626" }}
+                        />
+                      ))}
+                      <Area
+                        type="monotone"
+                        dataKey="close"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        fill="url(#priceGrad)"
+                        dot={false}
+                        activeDot={{ r: 3, fill: "#3b82f6" }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-40 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-sm text-gray-400">
+                    No price history available
+                  </div>
+                )}
+                <div className="flex gap-4 mt-2">
+                  {[
+                    { color: "#2563eb", label: "D Buy" },
+                    { color: "#dc2626", label: "R Buy" },
+                    { color: "#f97316", label: "Sell" },
+                  ].map(l => (
+                    <div key={l.label} className="flex items-center gap-1.5">
+                      <div className="w-4 h-0.5 rounded" style={{ background: l.color }} />
+                      <span className="text-[11px] text-gray-500">{l.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* All trades for this ticker */}
+              <div>
+                <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wider mb-2">
+                  All congressional trades ({drawerData.trades.length})
+                </div>
+                {drawerData.trades.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">No trades found in the database yet.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {drawerData.trades.map((t, i) => {
+                      const tc = TIER_CONFIG[t.tier] || TIER_CONFIG["low"];
+                      return (
+                        <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded text-[10px] font-medium flex-shrink-0",
+                            isBuy(t) ? "bg-green-50 text-green-700" : "bg-orange-50 text-orange-700"
+                          )}>
+                            {isBuy(t) ? "Buy" : "Sell"}
+                          </span>
+                          <span className="font-medium text-sm text-gray-900 flex-1 min-w-0 truncate">{t.representative}</span>
+                          <span className={cn("px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase flex-shrink-0", pc(t.party))}>
+                            {t.party}
+                          </span>
+                          <span className="text-xs text-gray-500 ml-auto flex-shrink-0">{t.date}</span>
+                          <span className="text-xs font-medium text-gray-600 flex-shrink-0">{fmtMoney(amountMid(t.amount))}</span>
+                          <span className="text-xs font-bold flex-shrink-0" style={{ color: tc.color }}>{t.signalScore}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Watch ticker from drawer */}
+              <button
+                onClick={() => drawerTicker && toggleTicker(drawerTicker)}
+                className={cn(
+                  "w-full py-3 rounded-xl text-sm font-medium transition-colors flex justify-center items-center gap-2 border",
+                  drawerTicker && watchlist.includes(drawerTicker)
+                    ? "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+                )}
+              >
+                <Star className={cn("w-4 h-4", drawerTicker && watchlist.includes(drawerTicker) && "fill-indigo-500 text-indigo-500")} />
+                {drawerTicker && watchlist.includes(drawerTicker) ? "Ticker Watched" : "Watch Ticker"}
+              </button>
+
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
